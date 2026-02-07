@@ -29,10 +29,14 @@ class TopicRangeLLM:
         except Exception as e:
             raise LLMError(f"LLM call failed: {e}") from e
 
-        if not response or not response.strip():
+        if not response:
             raise LLMError("Empty LLM response")
 
-        return response.strip()
+        response = response.strip()
+        if not response:
+            raise LLMError("Empty LLM response")
+
+        return response
 
 
 def _build_topic_ranges_prompt(tagged_text: str) -> str:
@@ -137,5 +141,4 @@ SENTENCE RULES:
 <grid>
 {tagged_text}
 </grid>
-
-Output:"""
+"""
