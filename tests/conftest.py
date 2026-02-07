@@ -2,7 +2,7 @@
 
 import pytest
 
-from txt_splitt._types import Sentence, SentenceGroup, SentenceRange
+from txt_splitt.types import Sentence, SentenceGroup, SentenceRange
 
 
 @pytest.fixture

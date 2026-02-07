@@ -2,7 +2,7 @@
 
 import re
 
-from txt_splitt._types import Sentence
+from txt_splitt.types import Sentence
 
 
 class RegexSentenceSplitter:

@@ -2,14 +2,14 @@
 
 from typing import final
 
-from txt_splitt._protocols import (
+from txt_splitt.protocols import (
     GapHandler,
     LLMStrategy,
     MarkerStrategy,
     ResponseParser,
     SentenceSplitter,
 )
-from txt_splitt._types import SplitResult
+from txt_splitt.types import SplitResult
 
 
 @final

@@ -2,9 +2,9 @@
 
 import pytest
 
-from txt_splitt._errors import ParseError
-from txt_splitt._parsers import TopicRangeParser
-from txt_splitt._types import SentenceRange
+from txt_splitt.errors import ParseError
+from txt_splitt.parsers import TopicRangeParser
+from txt_splitt.types import SentenceRange
 
 
 class TestTopicRangeParser:

@@ -2,7 +2,7 @@
 
 from typing import Protocol
 
-from txt_splitt._types import MarkedText, Sentence, SentenceGroup
+from txt_splitt.types import MarkedText, Sentence, SentenceGroup
 
 
 class SentenceSplitter(Protocol):

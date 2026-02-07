@@ -1,6 +1,6 @@
 """txt_splitt - A modular, pipeline-based text splitter."""
 
-from txt_splitt._errors import (
+from txt_splitt.errors import (
     GapError,
     LLMError,
     MarkerError,
@@ -8,13 +8,13 @@ from txt_splitt._errors import (
     SentenceSplitError,
     SplitterError,
 )
-from txt_splitt._gap_handlers import StrictGapHandler
-from txt_splitt._llm import LLMCallable, TopicRangeLLM
-from txt_splitt._markers import BracketMarker
-from txt_splitt._parsers import TopicRangeParser
-from txt_splitt._pipeline import Pipeline
-from txt_splitt._splitters import RegexSentenceSplitter
-from txt_splitt._types import (
+from txt_splitt.gap_handlers import StrictGapHandler
+from txt_splitt.llm import LLMCallable, TopicRangeLLM
+from txt_splitt.markers import BracketMarker
+from txt_splitt.parsers import TopicRangeParser
+from txt_splitt.pipeline import Pipeline
+from txt_splitt.splitters import RegexSentenceSplitter
+from txt_splitt.types import (
     MarkedText,
     Sentence,
     SentenceGroup,

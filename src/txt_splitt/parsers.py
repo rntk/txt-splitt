@@ -2,8 +2,8 @@
 
 import re
 
-from txt_splitt._errors import ParseError
-from txt_splitt._types import SentenceGroup, SentenceRange
+from txt_splitt.errors import ParseError
+from txt_splitt.types import SentenceGroup, SentenceRange
 
 
 class TopicRangeParser:

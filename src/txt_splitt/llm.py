@@ -2,8 +2,8 @@
 
 from typing import Protocol
 
-from txt_splitt._errors import LLMError
-from txt_splitt._types import MarkedText
+from txt_splitt.errors import LLMError
+from txt_splitt.types import MarkedText
 
 
 class LLMCallable(Protocol):

@@ -2,9 +2,9 @@
 
 import pytest
 
-from txt_splitt._errors import GapError
-from txt_splitt._gap_handlers import StrictGapHandler
-from txt_splitt._types import SentenceGroup, SentenceRange
+from txt_splitt.errors import GapError
+from txt_splitt.gap_handlers import StrictGapHandler
+from txt_splitt.types import SentenceGroup, SentenceRange
 
 
 class TestStrictGapHandler:

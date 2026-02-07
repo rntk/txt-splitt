@@ -1,7 +1,7 @@
 """Tests for marker strategies."""
 
-from txt_splitt._markers import BracketMarker
-from txt_splitt._types import MarkedText, Sentence
+from txt_splitt.markers import BracketMarker
+from txt_splitt.types import MarkedText, Sentence
 
 
 class TestBracketMarker:

@@ -1,7 +1,7 @@
 """Tests for sentence splitting."""
 
-from txt_splitt._splitters import RegexSentenceSplitter
-from txt_splitt._types import Sentence
+from txt_splitt.splitters import RegexSentenceSplitter
+from txt_splitt.types import Sentence
 
 
 class TestRegexSentenceSplitter:

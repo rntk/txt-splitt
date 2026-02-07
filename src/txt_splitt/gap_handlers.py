@@ -1,7 +1,7 @@
 """Gap handler implementations."""
 
-from txt_splitt._errors import GapError
-from txt_splitt._types import SentenceGroup, SentenceRange
+from txt_splitt.errors import GapError
+from txt_splitt.types import SentenceGroup, SentenceRange
 
 
 class StrictGapHandler:

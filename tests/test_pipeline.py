@@ -2,9 +2,9 @@
 
 import pytest
 
-from txt_splitt._errors import GapError, LLMError, ParseError
-from txt_splitt._pipeline import Pipeline
-from txt_splitt._types import (
+from txt_splitt.errors import GapError, LLMError, ParseError
+from txt_splitt.pipeline import Pipeline
+from txt_splitt.types import (
     MarkedText,
     Sentence,
     SentenceGroup,
@@ -165,10 +165,10 @@ class TestPipeline:
 
     def test_end_to_end_with_real_stages(self) -> None:
         """Integration test using real splitter, marker, parser, gap_handler."""
-        from txt_splitt._gap_handlers import StrictGapHandler
-        from txt_splitt._markers import BracketMarker
-        from txt_splitt._parsers import TopicRangeParser
-        from txt_splitt._splitters import RegexSentenceSplitter
+        from txt_splitt.gap_handlers import StrictGapHandler
+        from txt_splitt.markers import BracketMarker
+        from txt_splitt.parsers import TopicRangeParser
+        from txt_splitt.splitters import RegexSentenceSplitter
 
         text = "AI is growing fast. Climate change is real."
 
