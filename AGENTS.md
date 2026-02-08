@@ -6,7 +6,7 @@ This document provides instructions and standards for AI agents working on this 
 
 To maintain code quality, use the following tools via Docker. Ensure you have built the image first with `docker build -t txt_splitt_dev .`.
 
-**Note:** In some environments, Docker commands may require `sudo` (e.g., `sudo docker build ...` or `sudo docker run ...`). If you encounter permission denied errors, try prefixing the commands with `sudo`.
+**Note:** In some environments, Docker commands may require `sudo` (e.g., `sudo docker build ...` or `sudo docker run ...`). If you encounter permission denied errors, try prefixing the commands with `sudo`. If Docker is not available in the environment, try to run the tools (ruff, mypy, pytest) directly, as they might be pre-installed in your current environment.
 
 ### 1. Formatting and Linting (Ruff)
 Run these commands to verify code style and fix common issues:
@@ -31,4 +31,4 @@ docker run --rm -v $(pwd):/app -e PYTHONPATH=src txt_splitt_dev pytest
 
 - **Type Hints:** All Python code **MUST** use type hints. This includes function signatures (arguments and return types), class attributes, and complex variable assignments. Static type checking is strictly enforced.
 - **Verification:** Always run `ruff` and `mypy` before finalizing changes. Ensure all tests pass with `pytest`.
-- **Dockerized Environment:** All tools should be run within the provided Docker environment to ensure consistency.
+- **Dockerized Environment:** All tools should be run within the provided Docker environment to ensure consistency. If Docker is unavailable, run them directly in the shell.
