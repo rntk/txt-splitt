@@ -2,7 +2,7 @@ import json
 import sys
 import os
 
-def generate_html(json_data, output_file):
+def generate_html(json_data, output_file, original_file=None):
     sentences = json_data.get('sentences', [])
     groups = json_data.get('groups', [])
     
@@ -29,11 +29,25 @@ def generate_html(json_data, output_file):
         "        .sentence-item:hover { background-color: #f9f9f9; }",
         "        .sentence-index { font-weight: bold; color: #7f8c8d; margin-right: 10px; font-size: 0.9rem; }",
         "        .sentence-text { display: inline; }",
+        "        .original-file { background: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 30px; padding: 20px; border: 1px solid #e0e0e0; }",
+        "        .original-file h2 { margin-top: 0; color: #2c3e50; }",
+        "        pre { background: #f8f9fa; padding: 15px; border-radius: 4px; border: 1px solid #e9ecef; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word; }",
         "    </style>",
         "</head>",
         "<body>",
         "    <h1>Sentence Grouping Report</h1>"
     ]
+    
+    if original_file and os.path.exists(original_file):
+        try:
+            with open(original_file, 'r', encoding='utf-8') as f:
+                original_content = f.read()
+            html_content.append("    <div class='original-file'>")
+            html_content.append(f"        <h2>Original File: {os.path.basename(original_file)}</h2>")
+            html_content.append(f"        <pre><code>{original_content}</code></pre>")
+            html_content.append("    </div>")
+        except Exception as e:
+            print(f"Warning: Could not read original file {original_file}: {e}")
     
     for group in groups:
         labels = group.get('label', [])
@@ -74,11 +88,12 @@ def generate_html(json_data, output_file):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python generate_report.py <input_json> [output_html]")
+        print("Usage: python generate_report.py <input_json> [output_html] [original_file]")
         sys.exit(1)
     
     input_file = sys.argv[1]
     output_file = sys.argv[2] if len(sys.argv) > 2 else "report.html"
+    original_file = sys.argv[3] if len(sys.argv) > 3 else None
     
     if not os.path.exists(input_file):
         print(f"Error: File {input_file} not found.")
@@ -88,7 +103,7 @@ if __name__ == "__main__":
         with open(input_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
         
-        generate_html(data, output_file)
+        generate_html(data, output_file, original_file)
         print(f"Report successfully generated: {output_file}")
     except Exception as e:
         print(f"Error processing file: {e}")
