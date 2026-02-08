@@ -13,12 +13,11 @@ sys.path.append(str(Path(__file__).parent / "src"))
 
 from txt_splitt import (
     BracketMarker,
+    DenseRegexSentenceSplitter,
     NormalizingSplitter,
     Pipeline,
-    RegexSentenceSplitter,
-    ShortSentenceEnhancer,
     RepairingGapHandler,
-    StrictGapHandler,
+    ShortSentenceEnhancer,
     TopicRangeLLM,
     TopicRangeParser,
 )
@@ -81,6 +80,12 @@ def main() -> None:
     parser.add_argument(
         "--temperature", type=float, default=0.0, help="Temperature (default: 0.0)"
     )
+    parser.add_argument(
+        "--anchor-words",
+        type=int,
+        default=5,
+        help="Add a marker anchor roughly every N words (default: 22)",
+    )
     args = parser.parse_args()
 
     # Read input file
@@ -97,7 +102,11 @@ def main() -> None:
 
     # Create pipeline
     pipeline = Pipeline(
-        splitter=NormalizingSplitter(RegexSentenceSplitter()),
+        splitter=NormalizingSplitter(
+            DenseRegexSentenceSplitter(anchor_every_words=args.anchor_words),
+            min_length=20,
+            max_length=260,
+        ),
         marker=BracketMarker(),
         llm=TopicRangeLLM(llm_adapter, temperature=args.temperature),
         parser=TopicRangeParser(),

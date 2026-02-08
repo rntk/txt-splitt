@@ -29,7 +29,7 @@ from txt_splitt.protocols import (
     ResponseParser,
     SentenceSplitter,
 )
-from txt_splitt.splitters import RegexSentenceSplitter
+from txt_splitt.splitters import DenseRegexSentenceSplitter, RegexSentenceSplitter
 from txt_splitt.types import (
     MarkedText,
     Sentence,
@@ -58,6 +58,7 @@ __all__ = [
     # Concrete implementations
     "BracketMarker",
     "NormalizingSplitter",
+    "DenseRegexSentenceSplitter",
     "RegexSentenceSplitter",
     "ShortSentenceEnhancer",
     "LLMRepairingGapHandler",

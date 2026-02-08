@@ -29,7 +29,7 @@ class TopicRangeLLM:
 
 
 def _build_topic_ranges_prompt(tagged_text: str) -> str:
-    return f"""You are analyzing a text presented as numbered sentences.
+    return f"""You are analyzing a text where each sentence is prefixed with a {{N}} marker.
 Sentence numbers are 0-indexed.
 
 Your task: Extract specific, searchable topic keywords for each
@@ -127,7 +127,7 @@ SENTENCE RULES:
 - Every sentence must belong to exactly one keyword group
 - Be granular: separate distinct stories/topics into their own keyword groups
 
-<grid>
+<content>
 {tagged_text}
-</grid>
+</content>
 """
