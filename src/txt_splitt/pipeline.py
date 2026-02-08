@@ -52,7 +52,11 @@ class Pipeline:
         groups = self._parser.parse(response, marked.sentence_count)
 
         # Stage 5: Handle gaps
-        groups = self._gap_handler.handle(groups, marked.sentence_count)
+        groups = self._gap_handler.handle(
+            groups,
+            marked.sentence_count,
+            sentences=sentences,
+        )
 
         # Stage 6 (optional): Enhance boundaries
         if self._enhancer is not None:

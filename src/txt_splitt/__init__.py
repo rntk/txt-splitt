@@ -10,9 +10,14 @@ from txt_splitt.errors import (
     SentenceSplitError,
     SplitterError,
 )
-from txt_splitt.gap_handlers import StrictGapHandler
+from txt_splitt.gap_handlers import (
+    LLMRepairingGapHandler,
+    RepairingGapHandler,
+    StrictGapHandler,
+)
 from txt_splitt.llm import TopicRangeLLM
 from txt_splitt.markers import BracketMarker
+from txt_splitt.normalizers import NormalizingSplitter
 from txt_splitt.parsers import TopicRangeParser
 from txt_splitt.pipeline import Pipeline
 from txt_splitt.protocols import (
@@ -52,8 +57,11 @@ __all__ = [
     "SentenceSplitter",
     # Concrete implementations
     "BracketMarker",
+    "NormalizingSplitter",
     "RegexSentenceSplitter",
     "ShortSentenceEnhancer",
+    "LLMRepairingGapHandler",
+    "RepairingGapHandler",
     "StrictGapHandler",
     "TopicRangeLLM",
     "TopicRangeParser",

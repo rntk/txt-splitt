@@ -39,7 +39,10 @@ class GapHandler(Protocol):
     """Stage 5: Validate and handle gaps in sentence coverage."""
 
     def handle(
-        self, groups: list[SentenceGroup], sentence_count: int
+        self,
+        groups: list[SentenceGroup],
+        sentence_count: int,
+        sentences: list[Sentence] | None = None,
     ) -> list[SentenceGroup]: ...
 
 

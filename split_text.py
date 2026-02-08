@@ -13,9 +13,11 @@ sys.path.append(str(Path(__file__).parent / "src"))
 
 from txt_splitt import (
     BracketMarker,
+    NormalizingSplitter,
     Pipeline,
     RegexSentenceSplitter,
     ShortSentenceEnhancer,
+    RepairingGapHandler,
     StrictGapHandler,
     TopicRangeLLM,
     TopicRangeParser,
@@ -95,11 +97,11 @@ def main() -> None:
 
     # Create pipeline
     pipeline = Pipeline(
-        splitter=RegexSentenceSplitter(),
+        splitter=NormalizingSplitter(RegexSentenceSplitter()),
         marker=BracketMarker(),
         llm=TopicRangeLLM(llm_adapter, temperature=args.temperature),
         parser=TopicRangeParser(),
-        gap_handler=StrictGapHandler(),
+        gap_handler=RepairingGapHandler(),
         enhancer=ShortSentenceEnhancer(llm_adapter, temperature=args.temperature),
     )
 

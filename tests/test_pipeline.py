@@ -2,7 +2,13 @@
 
 import pytest
 
-from txt_splitt.errors import EnhancerError, GapError, LLMError, ParseError, SentenceSplitError
+from txt_splitt.errors import (
+    EnhancerError,
+    GapError,
+    LLMError,
+    ParseError,
+    SentenceSplitError,
+)
 from txt_splitt.pipeline import Pipeline
 from txt_splitt.types import (
     MarkedText,
@@ -50,7 +56,10 @@ class StubGapHandler:
         self._groups = groups
 
     def handle(
-        self, groups: list[SentenceGroup], sentence_count: int
+        self,
+        groups: list[SentenceGroup],
+        sentence_count: int,
+        sentences: list[Sentence] | None = None,
     ) -> list[SentenceGroup]:
         return self._groups
 
@@ -72,7 +81,10 @@ class FailingParser:
 
 class FailingGapHandler:
     def handle(
-        self, groups: list[SentenceGroup], sentence_count: int
+        self,
+        groups: list[SentenceGroup],
+        sentence_count: int,
+        sentences: list[Sentence] | None = None,
     ) -> list[SentenceGroup]:
         raise GapError("Gap found")
 
@@ -94,12 +106,17 @@ class RecordingGapHandler:
         self._groups = groups
         self.seen_groups: list[SentenceGroup] | None = None
         self.seen_sentence_count: int | None = None
+        self.seen_sentences: list[Sentence] | None = None
 
     def handle(
-        self, groups: list[SentenceGroup], sentence_count: int
+        self,
+        groups: list[SentenceGroup],
+        sentence_count: int,
+        sentences: list[Sentence] | None = None,
     ) -> list[SentenceGroup]:
         self.seen_groups = groups
         self.seen_sentence_count = sentence_count
+        self.seen_sentences = sentences
         return self._groups
 
 
@@ -295,6 +312,7 @@ class TestPipeline:
         assert parser.seen_sentence_count == 7
         assert gap_handler.seen_groups == groups
         assert gap_handler.seen_sentence_count == 7
+        assert gap_handler.seen_sentences == sentences
 
     def test_marker_receives_original_text_and_splitter_output(self) -> None:
         text = "Alpha. Beta."
