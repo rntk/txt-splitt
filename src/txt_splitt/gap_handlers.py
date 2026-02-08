@@ -29,37 +29,33 @@ class StrictGapHandler:
                 flat.append((gi, r))
         flat.sort(key=lambda x: (x[1].start, x[1].end))
 
-        # Resolve overlaps by trimming later ranges, collect adjusted ranges per group
+        # Resolve overlaps by trimming later ranges and verify continuous coverage
         adjusted: dict[int, list[SentenceRange]] = {i: [] for i in range(len(groups))}
-        current = 0
+        next_expected = 0
 
         for gi, r in flat:
-            if r.end < current:
+            if r.end < next_expected:
                 # Entirely consumed by previous range
                 continue
-            start = max(r.start, current)
+            start = max(r.start, next_expected)
             if start > r.end:
                 continue
-            adjusted[gi].append(SentenceRange(start=start, end=r.end))
-            current = r.end + 1
 
-        # Check for gaps and incomplete coverage
-        covered = 0
-        all_ranges: list[SentenceRange] = []
-        for ranges in adjusted.values():
-            all_ranges.extend(ranges)
-        all_ranges.sort(key=lambda r: (r.start, r.end))
-
-        for r in all_ranges:
-            if r.start != covered:
+            # Check for gap before this range
+            if start != next_expected:
                 raise GapError(
-                    f"Gap detected: sentences {covered}-{r.start - 1} are not covered"
+                    f"Gap detected: sentences {next_expected}-{start - 1} "
+                    "are not covered"
                 )
-            covered = r.end + 1
 
-        if covered <= max_index:
+            adjusted[gi].append(SentenceRange(start=start, end=r.end))
+            next_expected = r.end + 1
+
+        # Check for incomplete coverage at the end
+        if next_expected <= max_index:
             raise GapError(
-                f"Incomplete coverage: sentences {covered}-{max_index} are not covered"
+                f"Incomplete coverage: sentences {next_expected}-{max_index} "
+                "are not covered"
             )
 
         # Build result groups, preserving order, dropping empty groups

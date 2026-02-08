@@ -1,15 +1,8 @@
 """LLM strategy implementations."""
 
-from typing import Protocol
-
 from txt_splitt.errors import LLMError
+from txt_splitt.protocols import LLMCallable
 from txt_splitt.types import MarkedText
-
-
-class LLMCallable(Protocol):
-    """Protocol for LLM client callables."""
-
-    def call(self, prompt: str, temperature: float) -> str: ...
 
 
 class TopicRangeLLM:
@@ -29,14 +22,10 @@ class TopicRangeLLM:
         except Exception as e:
             raise LLMError(f"LLM call failed: {e}") from e
 
-        if not response:
+        if not response or not response.strip():
             raise LLMError("Empty LLM response")
 
-        response = response.strip()
-        if not response:
-            raise LLMError("Empty LLM response")
-
-        return response
+        return response.strip()
 
 
 def _build_topic_ranges_prompt(tagged_text: str) -> str:

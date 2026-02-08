@@ -2,7 +2,7 @@
 
 import pytest
 
-from txt_splitt.errors import GapError, LLMError, ParseError
+from txt_splitt.errors import GapError, LLMError, ParseError, SentenceSplitError
 from txt_splitt.pipeline import Pipeline
 from txt_splitt.types import (
     MarkedText,
@@ -53,6 +53,11 @@ class StubGapHandler:
         self, groups: list[SentenceGroup], sentence_count: int
     ) -> list[SentenceGroup]:
         return self._groups
+
+
+class FailingSplitter:
+    def split(self, text: str) -> list[Sentence]:
+        raise SentenceSplitError("Splitter failed")
 
 
 class FailingLLM:
@@ -160,6 +165,17 @@ class TestPipeline:
 
         assert isinstance(result.sentences, tuple)
         assert isinstance(result.groups, tuple)
+
+    def test_splitter_error_propagates(self) -> None:
+        pipeline = Pipeline(
+            splitter=FailingSplitter(),
+            marker=StubMarker(MarkedText(tagged_text="...", sentence_count=0)),
+            llm=StubLLM("response"),
+            parser=StubParser([]),
+            gap_handler=StubGapHandler([]),
+        )
+        with pytest.raises(SentenceSplitError):
+            pipeline.run("text")
 
     def test_llm_error_propagates(self) -> None:
         sentences = _make_sentences(3)

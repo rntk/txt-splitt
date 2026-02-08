@@ -4,6 +4,11 @@ import re
 
 from txt_splitt.types import Sentence
 
+# Compiled regex for sentence boundaries:
+# - Punctuation ([.!?]) followed by whitespace and uppercase letter (including Cyrillic)
+# - One or more newlines
+_SENTENCE_BOUNDARY_PATTERN = re.compile(r"((?<=[.!?])\s+(?=[A-ZА-Я]))|(\n+)")
+
 
 class RegexSentenceSplitter:
     """Split text into sentences using regex boundary detection.
@@ -17,7 +22,7 @@ class RegexSentenceSplitter:
         if not text or not text.strip():
             return []
 
-        boundaries = list(re.finditer(r"((?<=[.!?])\s+(?=[A-ZА-Я]))|(\n+)", text))
+        boundaries = list(_SENTENCE_BOUNDARY_PATTERN.finditer(text))
 
         result: list[Sentence] = []
         start = 0

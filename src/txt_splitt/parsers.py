@@ -5,6 +5,10 @@ import re
 from txt_splitt.errors import ParseError
 from txt_splitt.types import SentenceGroup, SentenceRange
 
+# Compiled regex for parsing range strings like "0-5" or "10"
+_RANGE_PATTERN = re.compile(r"(\d+)\s*-\s*(\d+)")
+_SINGLE_NUMBER_PATTERN = re.compile(r"(\d+)")
+
 
 class TopicRangeParser:
     """Parse LLM topic-range responses into sentence groups.
@@ -70,12 +74,12 @@ def _parse_range_string(ranges_str: str) -> list[tuple[int, int]]:
 
     for part in parts:
         if "-" in part and not part.startswith("-"):
-            match = re.match(r"(\d+)\s*-\s*(\d+)", part)
+            match = _RANGE_PATTERN.match(part)
             if match:
                 results.append((int(match.group(1)), int(match.group(2))))
                 continue
 
-        match = re.match(r"(\d+)", part)
+        match = _SINGLE_NUMBER_PATTERN.match(part)
         if match:
             n = int(match.group(1))
             results.append((n, n))

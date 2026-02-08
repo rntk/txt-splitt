@@ -5,6 +5,12 @@ from typing import Protocol
 from txt_splitt.types import MarkedText, Sentence, SentenceGroup
 
 
+class LLMCallable(Protocol):
+    """Protocol for LLM client callables."""
+
+    def call(self, prompt: str, temperature: float) -> str: ...
+
+
 class SentenceSplitter(Protocol):
     """Stage 1: Split raw text into sentences."""
 

@@ -31,6 +31,12 @@ class TestBracketMarker:
         assert result.sentence_count == 0
         assert result.tagged_text == ""
 
+    def test_empty_sentences_whitespace_text(self) -> None:
+        # Whitespace-only text with no sentences is treated as empty
+        result = self.marker.mark("   ", [])
+        assert result.sentence_count == 0
+        assert result.tagged_text == ""
+
     def test_sentence_count(self) -> None:
         text = "A. B. C."
         sentences = [

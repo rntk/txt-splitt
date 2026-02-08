@@ -7,7 +7,7 @@ class BracketMarker:
     """Format sentences with {N} bracket markers."""
 
     def mark(self, text: str, sentences: list[Sentence]) -> MarkedText:
-        rows: list[str] = [text[s.start : s.end] for s in sentences]
+        rows: list[str] = [s.text for s in sentences]
 
         if not rows and text.strip():
             rows.append(text)
