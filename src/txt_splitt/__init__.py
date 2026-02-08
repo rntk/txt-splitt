@@ -1,5 +1,6 @@
 """txt_splitt - A modular, pipeline-based text splitter."""
 
+from txt_splitt.chunkers import SizeBasedChunker
 from txt_splitt.enhancers import ShortSentenceEnhancer
 from txt_splitt.errors import (
     EnhancerError,
@@ -25,6 +26,7 @@ from txt_splitt.protocols import (
     GapHandler,
     LLMCallable,
     LLMStrategy,
+    MarkedTextChunker,
     MarkerStrategy,
     ResponseParser,
     SentenceSplitter,
@@ -53,11 +55,13 @@ __all__ = [
     "GapHandler",
     "LLMCallable",
     "LLMStrategy",
+    "MarkedTextChunker",
     "MarkerStrategy",
     "ResponseParser",
     "SentenceSplitter",
     # Concrete implementations
     "BracketMarker",
+    "SizeBasedChunker",
     "NormalizingSplitter",
     "DenseRegexSentenceSplitter",
     "RegexSentenceSplitter",

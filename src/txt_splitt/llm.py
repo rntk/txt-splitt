@@ -1,18 +1,45 @@
 """LLM strategy implementations."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from txt_splitt.errors import LLMError
 from txt_splitt.protocols import LLMCallable
 from txt_splitt.types import MarkedText
+
+if TYPE_CHECKING:
+    from txt_splitt.protocols import MarkedTextChunker
 
 
 class TopicRangeLLM:
     """Query an LLM to identify topic ranges in marked text."""
 
-    def __init__(self, client: LLMCallable, *, temperature: float = 0.0) -> None:
+    def __init__(
+        self,
+        client: LLMCallable,
+        *,
+        temperature: float = 0.0,
+        chunker: MarkedTextChunker | None = None,
+    ) -> None:
         self._client = client
         self._temperature = temperature
+        self._chunker = chunker
 
     def query(self, marked_text: MarkedText) -> str:
+        chunks = (
+            self._chunker.chunk(marked_text)
+            if self._chunker is not None
+            else [marked_text]
+        )
+
+        responses: list[str] = []
+        for chunk in chunks:
+            responses.append(self._query_single(chunk))
+
+        return "\n".join(responses)
+
+    def _query_single(self, marked_text: MarkedText) -> str:
         prompt = _build_topic_ranges_prompt(marked_text.tagged_text)
 
         try:

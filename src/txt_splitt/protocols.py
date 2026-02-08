@@ -46,6 +46,12 @@ class GapHandler(Protocol):
     ) -> list[SentenceGroup]: ...
 
 
+class MarkedTextChunker(Protocol):
+    """Optional: split MarkedText into smaller chunks for LLM querying."""
+
+    def chunk(self, marked_text: MarkedText) -> list[MarkedText]: ...
+
+
 class Enhancer(Protocol):
     """Stage 6 (optional): Refine group boundaries for short sentences."""
 
