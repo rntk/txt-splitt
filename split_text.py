@@ -16,7 +16,7 @@ from txt_splitt import (
     DenseRegexSentenceSplitter,
     NormalizingSplitter,
     Pipeline,
-    RepairingGapHandler,
+    LLMRepairingGapHandler,
     ShortSentenceEnhancer,
     TopicRangeLLM,
     TopicRangeParser,
@@ -254,7 +254,7 @@ def main() -> None:
         marker=BracketMarker(),
         llm=TopicRangeLLM(llm_adapter, temperature=args.temperature),
         parser=TopicRangeParser(),
-        gap_handler=RepairingGapHandler(),
+        gap_handler=LLMRepairingGapHandler(llm_adapter, temperature=args.temperature),
         #enhancer=ShortSentenceEnhancer(llm_adapter, temperature=args.temperature),
     )
 
