@@ -23,3 +23,7 @@ class ParseError(SplitterError):
 
 class GapError(SplitterError):
     """Raised when gap validation (stage 5) fails."""
+
+
+class EnhancerError(SplitterError):
+    """Raised when the enhancer stage (stage 6) fails."""

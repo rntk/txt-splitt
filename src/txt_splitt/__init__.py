@@ -1,6 +1,8 @@
 """txt_splitt - A modular, pipeline-based text splitter."""
 
+from txt_splitt.enhancers import ShortSentenceEnhancer
 from txt_splitt.errors import (
+    EnhancerError,
     GapError,
     LLMError,
     MarkerError,
@@ -14,6 +16,7 @@ from txt_splitt.markers import BracketMarker
 from txt_splitt.parsers import TopicRangeParser
 from txt_splitt.pipeline import Pipeline
 from txt_splitt.protocols import (
+    Enhancer,
     GapHandler,
     LLMCallable,
     LLMStrategy,
@@ -40,6 +43,7 @@ __all__ = [
     "SentenceRange",
     "SplitResult",
     # Protocols
+    "Enhancer",
     "GapHandler",
     "LLMCallable",
     "LLMStrategy",
@@ -49,10 +53,12 @@ __all__ = [
     # Concrete implementations
     "BracketMarker",
     "RegexSentenceSplitter",
+    "ShortSentenceEnhancer",
     "StrictGapHandler",
     "TopicRangeLLM",
     "TopicRangeParser",
     # Errors
+    "EnhancerError",
     "GapError",
     "LLMError",
     "MarkerError",

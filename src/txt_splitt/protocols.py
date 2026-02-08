@@ -41,3 +41,11 @@ class GapHandler(Protocol):
     def handle(
         self, groups: list[SentenceGroup], sentence_count: int
     ) -> list[SentenceGroup]: ...
+
+
+class Enhancer(Protocol):
+    """Stage 6 (optional): Refine group boundaries for short sentences."""
+
+    def enhance(
+        self, groups: list[SentenceGroup], sentences: list[Sentence]
+    ) -> list[SentenceGroup]: ...

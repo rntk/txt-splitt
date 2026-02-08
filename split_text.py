@@ -15,6 +15,7 @@ from txt_splitt import (
     BracketMarker,
     Pipeline,
     RegexSentenceSplitter,
+    ShortSentenceEnhancer,
     StrictGapHandler,
     TopicRangeLLM,
     TopicRangeParser,
@@ -99,6 +100,7 @@ def main() -> None:
         llm=TopicRangeLLM(llm_adapter, temperature=args.temperature),
         parser=TopicRangeParser(),
         gap_handler=StrictGapHandler(),
+        enhancer=ShortSentenceEnhancer(llm_adapter, temperature=args.temperature),
     )
 
     # Run pipeline

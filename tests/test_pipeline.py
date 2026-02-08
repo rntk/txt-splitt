@@ -2,7 +2,7 @@
 
 import pytest
 
-from txt_splitt.errors import GapError, LLMError, ParseError, SentenceSplitError
+from txt_splitt.errors import EnhancerError, GapError, LLMError, ParseError, SentenceSplitError
 from txt_splitt.pipeline import Pipeline
 from txt_splitt.types import (
     MarkedText,
@@ -101,6 +101,37 @@ class RecordingGapHandler:
         self.seen_groups = groups
         self.seen_sentence_count = sentence_count
         return self._groups
+
+
+class StubEnhancer:
+    def __init__(self, groups: list[SentenceGroup]) -> None:
+        self._groups = groups
+
+    def enhance(
+        self, groups: list[SentenceGroup], sentences: list[Sentence]
+    ) -> list[SentenceGroup]:
+        return self._groups
+
+
+class RecordingEnhancer:
+    def __init__(self, groups: list[SentenceGroup]) -> None:
+        self._groups = groups
+        self.seen_groups: list[SentenceGroup] | None = None
+        self.seen_sentences: list[Sentence] | None = None
+
+    def enhance(
+        self, groups: list[SentenceGroup], sentences: list[Sentence]
+    ) -> list[SentenceGroup]:
+        self.seen_groups = groups
+        self.seen_sentences = sentences
+        return self._groups
+
+
+class FailingEnhancer:
+    def enhance(
+        self, groups: list[SentenceGroup], sentences: list[Sentence]
+    ) -> list[SentenceGroup]:
+        raise EnhancerError("Enhancement failed")
 
 
 class RecordingMarker:
@@ -283,3 +314,76 @@ class TestPipeline:
 
         assert marker.seen_text == text
         assert marker.seen_sentences == sentences
+
+    def test_pipeline_without_enhancer_works_unchanged(self) -> None:
+        sentences = _make_sentences(3)
+        groups = _make_groups()
+
+        pipeline = Pipeline(
+            splitter=StubSplitter(sentences),
+            marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
+            llm=StubLLM("Technology>AI: 0-2"),
+            parser=StubParser(groups),
+            gap_handler=StubGapHandler(groups),
+        )
+        result = pipeline.run("Some text")
+
+        assert len(result.groups) == 1
+        assert result.groups[0].label == ("Technology", "AI")
+
+    def test_pipeline_with_enhancer_none_works(self) -> None:
+        sentences = _make_sentences(3)
+        groups = _make_groups()
+
+        pipeline = Pipeline(
+            splitter=StubSplitter(sentences),
+            marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
+            llm=StubLLM("..."),
+            parser=StubParser(groups),
+            gap_handler=StubGapHandler(groups),
+            enhancer=None,
+        )
+        result = pipeline.run("text")
+
+        assert len(result.groups) == 1
+
+    def test_pipeline_with_enhancer_calls_enhance(self) -> None:
+        sentences = _make_sentences(3)
+        gap_groups = _make_groups()
+        enhanced_groups = [
+            SentenceGroup(
+                label=("Science",),
+                ranges=(SentenceRange(start=0, end=2),),
+            ),
+        ]
+        enhancer = RecordingEnhancer(enhanced_groups)
+
+        pipeline = Pipeline(
+            splitter=StubSplitter(sentences),
+            marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
+            llm=StubLLM("..."),
+            parser=StubParser(gap_groups),
+            gap_handler=StubGapHandler(gap_groups),
+            enhancer=enhancer,
+        )
+        result = pipeline.run("text")
+
+        assert enhancer.seen_groups == gap_groups
+        assert enhancer.seen_sentences == sentences
+        # Pipeline returns the enhancer's output
+        assert result.groups[0].label == ("Science",)
+
+    def test_enhancer_error_propagates(self) -> None:
+        sentences = _make_sentences(3)
+        groups = _make_groups()
+
+        pipeline = Pipeline(
+            splitter=StubSplitter(sentences),
+            marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
+            llm=StubLLM("..."),
+            parser=StubParser(groups),
+            gap_handler=StubGapHandler(groups),
+            enhancer=FailingEnhancer(),
+        )
+        with pytest.raises(EnhancerError, match="Enhancement failed"):
+            pipeline.run("text")

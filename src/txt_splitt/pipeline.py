@@ -3,6 +3,7 @@
 from typing import final
 
 from txt_splitt.protocols import (
+    Enhancer,
     GapHandler,
     LLMStrategy,
     MarkerStrategy,
@@ -24,12 +25,14 @@ class Pipeline:
         llm: LLMStrategy,
         parser: ResponseParser,
         gap_handler: GapHandler,
+        enhancer: Enhancer | None = None,
     ) -> None:
         self._splitter = splitter
         self._marker = marker
         self._llm = llm
         self._parser = parser
         self._gap_handler = gap_handler
+        self._enhancer = enhancer
 
     def run(self, text: str) -> SplitResult:
         """Run the full pipeline on input text.
@@ -50,6 +53,10 @@ class Pipeline:
 
         # Stage 5: Handle gaps
         groups = self._gap_handler.handle(groups, marked.sentence_count)
+
+        # Stage 6 (optional): Enhance boundaries
+        if self._enhancer is not None:
+            groups = self._enhancer.enhance(groups, sentences)
 
         return SplitResult(
             sentences=tuple(sentences),
