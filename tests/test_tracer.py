@@ -126,12 +126,13 @@ class TestTracer:
         assert "  [TRACE] child" in output
         assert "y: hello" in output
 
-    def test_format_truncates_long_values(self) -> None:
+    def test_format_prints_full_long_values(self) -> None:
         tracer = Tracer()
-        with tracer.span("op", big="A" * 500):
+        long_value = "A" * 500
+        with tracer.span("op", big=long_value):
             pass
         output = tracer.format()
-        assert "500 chars" in output
+        assert f"big: {long_value}" in output
 
 
 class StubLLM:

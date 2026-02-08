@@ -9,8 +9,6 @@ from typing import Any, Generator
 
 from txt_splitt.protocols import LLMCallable
 
-_ATTR_TRUNCATE = 200
-
 
 @dataclass
 class Span:
@@ -82,10 +80,7 @@ def _format_span(span: Span, lines: list[str], indent: int) -> None:
     dur = f"{span.duration_ms:.1f}ms"
     lines.append(f"{prefix}[TRACE] {span.name} ({dur})")
     for key, value in span.attributes.items():
-        val_str = str(value)
-        if len(val_str) > _ATTR_TRUNCATE:
-            val_str = val_str[:_ATTR_TRUNCATE] + f"... ({len(str(value))} chars)"
-        lines.append(f"{prefix}  {key}: {val_str}")
+        lines.append(f"{prefix}  {key}: {value}")
     for child in span.children:
         _format_span(child, lines, indent + 1)
 
