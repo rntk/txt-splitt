@@ -66,7 +66,7 @@ class TestTopicRangeLLM:
         with pytest.raises(LLMError, match="Custom LLM error"):
             llm.query(marked_text)
 
-    def test_prompt_contains_tagged_text_and_grid_tags(self) -> None:
+    def test_prompt_contains_tagged_text_and_content_tags(self) -> None:
         client = MagicMock()
         client.call.return_value = "Technology>AI: 0"
         llm = TopicRangeLLM(client)
@@ -78,8 +78,8 @@ class TestTopicRangeLLM:
         args, kwargs = client.call.call_args
         prompt = args[0]
         assert tagged_text in prompt
-        assert "<grid>" in prompt
-        assert "</grid>" in prompt
+        assert "<content>" in prompt
+        assert "</content>" in prompt
         assert kwargs["temperature"] == 0.0
 
     def test_custom_temperature_is_forwarded(self) -> None:
