@@ -1,13 +1,18 @@
 """Gap handler implementations."""
 
+from __future__ import annotations
+
 from txt_splitt.errors import GapError
 from txt_splitt.protocols import LLMCallable
+from txt_splitt.tracer import NoOpSpan, NoOpTracer, Span, Tracer
 from txt_splitt.types import Sentence, SentenceGroup, SentenceRange
 
 _CONTEXT_SIZE = 3
 _DEFAULT_NEW_TOPIC = ("Uncategorized",)
 
 type OwnerId = int | str
+type TracingSpan = Span | NoOpSpan
+type GapTracer = Tracer | NoOpTracer
 
 
 class StrictGapHandler:
@@ -179,15 +184,36 @@ class LLMRepairingGapHandler:
     Overlaps are still trimmed by keeping earlier coverage first.
     """
 
-    def __init__(self, client: LLMCallable, *, temperature: float = 0.0) -> None:
+    def __init__(
+        self,
+        client: LLMCallable,
+        *,
+        temperature: float = 0.0,
+        tracer: Tracer | None = None,
+    ) -> None:
         self._client = client
         self._temperature = temperature
+        self._tracer: GapTracer = tracer if tracer is not None else NoOpTracer()
 
     def handle(
         self,
         groups: list[SentenceGroup],
         sentence_count: int,
         sentences: list[Sentence] | None = None,
+    ) -> list[SentenceGroup]:
+        with self._tracer.span(
+            "gap_handler.llm_repair",
+            sentence_count=sentence_count,
+            input_group_count=len(groups),
+        ) as handler_span:
+            return self._handle(groups, sentence_count, sentences, handler_span)
+
+    def _handle(
+        self,
+        groups: list[SentenceGroup],
+        sentence_count: int,
+        sentences: list[Sentence] | None,
+        handler_span: TracingSpan,
     ) -> list[SentenceGroup]:
         if sentence_count <= 0:
             raise GapError("sentence_count must be positive")
@@ -233,33 +259,52 @@ class LLMRepairingGapHandler:
         if next_expected <= max_index:
             gaps.append((next_expected, max_index, last_owner, None))
 
+        handler_span.attributes["gap_count"] = len(gaps)
+        handler_span.attributes["gaps"] = [
+            {
+                "start": gap_start,
+                "end": gap_end,
+                "prev_owner": _owner_debug_label(prev_owner, groups),
+                "next_owner": _owner_debug_label(next_owner, groups),
+            }
+            for gap_start, gap_end, prev_owner, next_owner in gaps
+        ]
+
         new_group_labels: dict[str, tuple[str, ...]] = {}
         new_group_order: list[str] = []
         new_group_by_label: dict[tuple[str, ...], str] = {}
 
         for gap_start, gap_end, prev_owner, next_owner in gaps:
-            for sent_idx in range(gap_start, gap_end + 1):
-                owner = _resolve_gap_sentence_owner(
-                    client=self._client,
-                    temperature=self._temperature,
-                    sentences=sentences,
-                    ownership=ownership,
-                    sentence_index=sent_idx,
-                    groups=groups,
-                    prev_owner=prev_owner,
-                    next_owner=next_owner,
-                )
+            with self._tracer.span(
+                "gap_handler.llm_repair.gap",
+                gap_start=gap_start,
+                gap_end=gap_end,
+                prev_owner=_owner_debug_label(prev_owner, groups),
+                next_owner=_owner_debug_label(next_owner, groups),
+            ):
+                for sent_idx in range(gap_start, gap_end + 1):
+                    owner = _resolve_gap_sentence_owner(
+                        tracer=self._tracer,
+                        client=self._client,
+                        temperature=self._temperature,
+                        sentences=sentences,
+                        ownership=ownership,
+                        sentence_index=sent_idx,
+                        groups=groups,
+                        prev_owner=prev_owner,
+                        next_owner=next_owner,
+                    )
 
-                if isinstance(owner, tuple):
-                    label = owner
-                    if label not in new_group_by_label:
-                        new_owner_id = f"new-{len(new_group_order)}"
-                        new_group_by_label[label] = new_owner_id
-                        new_group_labels[new_owner_id] = label
-                        new_group_order.append(new_owner_id)
-                    ownership[sent_idx] = new_group_by_label[label]
-                else:
-                    ownership[sent_idx] = owner
+                    if isinstance(owner, tuple):
+                        label = owner
+                        if label not in new_group_by_label:
+                            new_owner_id = f"new-{len(new_group_order)}"
+                            new_group_by_label[label] = new_owner_id
+                            new_group_labels[new_owner_id] = label
+                            new_group_order.append(new_owner_id)
+                        ownership[sent_idx] = new_group_by_label[label]
+                    else:
+                        ownership[sent_idx] = owner
 
         for si in range(sentence_count):
             if si not in ownership:
@@ -295,11 +340,22 @@ class LLMRepairingGapHandler:
                 )
             )
 
+        handler_span.attributes["output_group_count"] = len(result)
+        handler_span.attributes["new_group_count"] = len(new_group_order)
+        handler_span.attributes["new_groups"] = [
+            {
+                "id": gid,
+                "label": " > ".join(new_group_labels[gid]),
+                "size": len(new_indices[gid]),
+            }
+            for gid in new_group_order
+        ]
         return result
 
 
 def _resolve_gap_sentence_owner(
     *,
+    tracer: GapTracer,
     client: LLMCallable,
     temperature: float,
     sentences: list[Sentence],
@@ -309,41 +365,71 @@ def _resolve_gap_sentence_owner(
     prev_owner: int | None,
     next_owner: int | None,
 ) -> int | tuple[str, ...]:
-    if prev_owner is None and next_owner is None:
-        raise GapError("Unable to resolve gap: no neighboring groups")
-    if prev_owner is None:
+    with tracer.span(
+        "gap_handler.llm_repair.resolve_sentence",
+        sentence_index=sentence_index,
+        prev_owner=_owner_debug_label(prev_owner, groups),
+        next_owner=_owner_debug_label(next_owner, groups),
+    ) as span:
+        if prev_owner is None and next_owner is None:
+            raise GapError("Unable to resolve gap: no neighboring groups")
+        if prev_owner is None:
+            if next_owner is None:
+                raise GapError("Unable to resolve gap: missing next owner")
+            span.attributes["resolved_owner"] = _owner_debug_label(next_owner, groups)
+            span.attributes["decision"] = "next_no_prev_neighbor"
+            return next_owner
         if next_owner is None:
-            raise GapError("Unable to resolve gap: missing next owner")
-        return next_owner
-    if next_owner is None:
+            span.attributes["resolved_owner"] = _owner_debug_label(prev_owner, groups)
+            span.attributes["decision"] = "previous_no_next_neighbor"
+            return prev_owner
+
+        prev_context = _gather_context(
+            sentences, ownership, prev_owner, sentence_index, -1
+        )
+        next_context = _gather_context(
+            sentences, ownership, next_owner, sentence_index, 1
+        )
+
+        prompt = _build_gap_prompt(
+            sentence_text=sentences[sentence_index].text,
+            prev_label=groups[prev_owner].label,
+            prev_context=prev_context,
+            next_label=groups[next_owner].label,
+            next_context=next_context,
+        )
+        span.attributes["sentence_text"] = sentences[sentence_index].text
+        span.attributes["prev_label"] = " > ".join(groups[prev_owner].label)
+        span.attributes["next_label"] = " > ".join(groups[next_owner].label)
+        span.attributes["prev_context"] = prev_context
+        span.attributes["next_context"] = next_context
+        span.attributes["prompt"] = prompt
+
+        try:
+            response = client.call(prompt, temperature=temperature)
+        except GapError:
+            raise
+        except Exception as e:
+            span.attributes["error"] = str(e)
+            raise GapError(f"LLM call failed during gap repair: {e}") from e
+
+        span.attributes["response"] = response
+        decision, label = _parse_gap_response(response)
+        span.attributes["parsed_decision"] = decision
+        span.attributes["parsed_label"] = " > ".join(label) if label else None
+        if decision == "previous":
+            span.attributes["resolved_owner"] = _owner_debug_label(prev_owner, groups)
+            return prev_owner
+        if decision == "next":
+            span.attributes["resolved_owner"] = _owner_debug_label(next_owner, groups)
+            return next_owner
+        if label is not None:
+            span.attributes["resolved_owner"] = f"NEW ({' > '.join(label)})"
+            return label
+
+        span.attributes["fallback"] = "previous"
+        span.attributes["resolved_owner"] = _owner_debug_label(prev_owner, groups)
         return prev_owner
-
-    prev_context = _gather_context(sentences, ownership, prev_owner, sentence_index, -1)
-    next_context = _gather_context(sentences, ownership, next_owner, sentence_index, 1)
-
-    prompt = _build_gap_prompt(
-        sentence_text=sentences[sentence_index].text,
-        prev_label=groups[prev_owner].label,
-        prev_context=prev_context,
-        next_label=groups[next_owner].label,
-        next_context=next_context,
-    )
-
-    try:
-        response = client.call(prompt, temperature=temperature)
-    except GapError:
-        raise
-    except Exception as e:
-        raise GapError(f"LLM call failed during gap repair: {e}") from e
-
-    decision, label = _parse_gap_response(response)
-    if decision == "previous":
-        return prev_owner
-    if decision == "next":
-        return next_owner
-    if label is not None:
-        return label
-    return prev_owner
 
 
 def _gather_context(
@@ -455,3 +541,9 @@ def _indices_to_ranges(indices: list[int]) -> list[SentenceRange]:
 
     ranges.append(SentenceRange(start=start, end=end))
     return ranges
+
+
+def _owner_debug_label(owner: int | None, groups: list[SentenceGroup]) -> str:
+    if owner is None:
+        return "None"
+    return f"{owner} ({' > '.join(groups[owner].label)})"

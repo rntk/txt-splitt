@@ -261,7 +261,7 @@ def main() -> None:
         llm=TopicRangeLLM(llm_callable, temperature=args.temperature),
         parser=TopicRangeParser(),
         gap_handler=LLMRepairingGapHandler(
-            llm_callable, temperature=args.temperature
+            llm_callable, temperature=args.temperature, tracer=tracer
         ),
         #enhancer=ShortSentenceEnhancer(llm_callable, temperature=args.temperature),
         tracer=tracer,
