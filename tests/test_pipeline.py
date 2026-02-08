@@ -72,6 +72,44 @@ class FailingGapHandler:
         raise GapError("Gap found")
 
 
+class RecordingParser:
+    def __init__(self, groups: list[SentenceGroup]) -> None:
+        self._groups = groups
+        self.seen_response: str | None = None
+        self.seen_sentence_count: int | None = None
+
+    def parse(self, response: str, sentence_count: int) -> list[SentenceGroup]:
+        self.seen_response = response
+        self.seen_sentence_count = sentence_count
+        return self._groups
+
+
+class RecordingGapHandler:
+    def __init__(self, groups: list[SentenceGroup]) -> None:
+        self._groups = groups
+        self.seen_groups: list[SentenceGroup] | None = None
+        self.seen_sentence_count: int | None = None
+
+    def handle(
+        self, groups: list[SentenceGroup], sentence_count: int
+    ) -> list[SentenceGroup]:
+        self.seen_groups = groups
+        self.seen_sentence_count = sentence_count
+        return self._groups
+
+
+class RecordingMarker:
+    def __init__(self, result: MarkedText) -> None:
+        self._result = result
+        self.seen_text: str | None = None
+        self.seen_sentences: list[Sentence] | None = None
+
+    def mark(self, text: str, sentences: list[Sentence]) -> MarkedText:
+        self.seen_text = text
+        self.seen_sentences = sentences
+        return self._result
+
+
 def _make_sentences(n: int) -> list[Sentence]:
     return [
         Sentence(index=i, start=i * 10, end=i * 10 + 5, text=f"Sent {i}.")
@@ -189,3 +227,43 @@ class TestPipeline:
         assert result.sentences[1].text == "Climate change is real."
         assert result.groups[0].label == ("Technology", "AI")
         assert result.groups[1].label == ("Science", "Climate")
+
+    def test_parser_and_gap_handler_use_marker_sentence_count(self) -> None:
+        sentences = _make_sentences(3)
+        groups = _make_groups()
+        parser = RecordingParser(groups)
+        gap_handler = RecordingGapHandler(groups)
+
+        pipeline = Pipeline(
+            splitter=StubSplitter(sentences),
+            marker=StubMarker(MarkedText(tagged_text="...", sentence_count=7)),
+            llm=StubLLM("Technology>AI: 0-6"),
+            parser=parser,
+            gap_handler=gap_handler,
+        )
+
+        pipeline.run("Some text")
+
+        assert parser.seen_response == "Technology>AI: 0-6"
+        assert parser.seen_sentence_count == 7
+        assert gap_handler.seen_groups == groups
+        assert gap_handler.seen_sentence_count == 7
+
+    def test_marker_receives_original_text_and_splitter_output(self) -> None:
+        text = "Alpha. Beta."
+        sentences = _make_sentences(2)
+        groups = _make_groups()
+        marker = RecordingMarker(MarkedText(tagged_text="...", sentence_count=2))
+
+        pipeline = Pipeline(
+            splitter=StubSplitter(sentences),
+            marker=marker,
+            llm=StubLLM("Technology>AI: 0-1"),
+            parser=StubParser(groups),
+            gap_handler=StubGapHandler(groups),
+        )
+
+        pipeline.run(text)
+
+        assert marker.seen_text == text
+        assert marker.seen_sentences == sentences

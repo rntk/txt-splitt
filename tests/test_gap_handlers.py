@@ -122,3 +122,44 @@ class TestStrictGapHandler:
         result = self.handler.handle(groups, sentence_count=5)
         assert len(result) == 1
         assert result[0].label == ("Technology",)
+
+    def test_overlap_chain_trimmed_progressively(self) -> None:
+        groups = [
+            SentenceGroup(
+                label=("A",),
+                ranges=(SentenceRange(start=0, end=2),),
+            ),
+            SentenceGroup(
+                label=("B",),
+                ranges=(SentenceRange(start=1, end=3),),
+            ),
+            SentenceGroup(
+                label=("C",),
+                ranges=(SentenceRange(start=3, end=4),),
+            ),
+        ]
+
+        result = self.handler.handle(groups, sentence_count=5)
+        assert result[0].ranges == (SentenceRange(start=0, end=2),)
+        assert result[1].ranges == (SentenceRange(start=3, end=3),)
+        assert result[2].ranges == (SentenceRange(start=4, end=4),)
+
+    def test_multiple_ranges_in_group_preserved_after_trimming(self) -> None:
+        groups = [
+            SentenceGroup(
+                label=("A",),
+                ranges=(SentenceRange(start=0, end=1), SentenceRange(start=4, end=4)),
+            ),
+            SentenceGroup(
+                label=("B",),
+                ranges=(SentenceRange(start=1, end=3),),
+            ),
+        ]
+
+        result = self.handler.handle(groups, sentence_count=5)
+        assert len(result) == 2
+        assert result[0].ranges == (
+            SentenceRange(start=0, end=1),
+            SentenceRange(start=4, end=4),
+        )
+        assert result[1].ranges == (SentenceRange(start=2, end=3),)

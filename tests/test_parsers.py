@@ -106,3 +106,22 @@ class TestTopicRangeParser:
         response = "Technology>AI: 5-0"
         result = self.parser.parse(response, sentence_count=10)
         assert result[0].ranges == (SentenceRange(start=0, end=5),)
+
+    def test_ignores_invalid_range_parts_but_keeps_valid_ones(self) -> None:
+        response = "Technology>AI: nope, 2-3, ???, 5"
+        result = self.parser.parse(response, sentence_count=10)
+        assert result[0].ranges == (
+            SentenceRange(start=2, end=3),
+            SentenceRange(start=5, end=5),
+        )
+
+    def test_line_with_only_invalid_ranges_is_skipped(self) -> None:
+        response = "Technology>AI: nope, ???\nScience>Climate: 0-1"
+        result = self.parser.parse(response, sentence_count=5)
+        assert len(result) == 1
+        assert result[0].label == ("Science", "Climate")
+
+    def test_all_lines_with_invalid_ranges_raise(self) -> None:
+        response = "Technology>AI: nope\nScience>Climate: ???"
+        with pytest.raises(ParseError):
+            self.parser.parse(response, sentence_count=5)
