@@ -30,6 +30,7 @@ from txt_splitt.protocols import (
     SentenceSplitter,
 )
 from txt_splitt.splitters import DenseRegexSentenceSplitter, RegexSentenceSplitter
+from txt_splitt.tracer import NoOpSpan, NoOpTracer, Span, Tracer, TracingLLMCallable
 from txt_splitt.types import (
     MarkedText,
     Sentence,
@@ -66,6 +67,12 @@ __all__ = [
     "StrictGapHandler",
     "TopicRangeLLM",
     "TopicRangeParser",
+    # Tracing
+    "NoOpSpan",
+    "NoOpTracer",
+    "Span",
+    "Tracer",
+    "TracingLLMCallable",
     # Errors
     "EnhancerError",
     "GapError",

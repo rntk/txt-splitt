@@ -18,6 +18,8 @@ from txt_splitt import (
     Pipeline,
     LLMRepairingGapHandler,
     ShortSentenceEnhancer,
+    Tracer,
+    TracingLLMCallable,
     TopicRangeLLM,
     TopicRangeParser,
 )
@@ -32,14 +34,7 @@ class LLamaCPPAdapter:
 
     def call(self, prompt: str, temperature: float) -> str:
         """Call the LLM with a prompt and temperature."""
-        print("===" * 10)
-        print(f"DEBUG: LLM Prompt:\n{prompt}")
-        print("===" * 10)
-        response = self._client.call([prompt], temperature=temperature)
-        print("===" * 10)
-        print(f"DEBUG: LLM Response:\n{response}")
-        print("===" * 10)
-        return response
+        return self._client.call([prompt], temperature=temperature)
 
 
 def result_to_dict(result: Any) -> dict[str, Any]:
@@ -230,6 +225,11 @@ def main() -> None:
         default=5,
         help="Add a marker anchor roughly every N words (default: 22)",
     )
+    parser.add_argument(
+        "--trace",
+        action="store_true",
+        help="Enable tracing and print the trace after the run",
+    )
     args = parser.parse_args()
 
     # Read input file
@@ -244,6 +244,12 @@ def main() -> None:
     llm_client = LLamaCPP(host=args.host, model=args.model)
     llm_adapter = LLamaCPPAdapter(llm_client)
 
+    # Set up tracing if requested
+    tracer = Tracer() if args.trace else None
+    llm_callable = (
+        TracingLLMCallable(llm_adapter, tracer) if args.trace else llm_adapter
+    )
+
     # Create pipeline
     pipeline = Pipeline(
         splitter=NormalizingSplitter(
@@ -252,10 +258,13 @@ def main() -> None:
             max_length=260,
         ),
         marker=BracketMarker(),
-        llm=TopicRangeLLM(llm_adapter, temperature=args.temperature),
+        llm=TopicRangeLLM(llm_callable, temperature=args.temperature),
         parser=TopicRangeParser(),
-        gap_handler=LLMRepairingGapHandler(llm_adapter, temperature=args.temperature),
-        #enhancer=ShortSentenceEnhancer(llm_adapter, temperature=args.temperature),
+        gap_handler=LLMRepairingGapHandler(
+            llm_callable, temperature=args.temperature
+        ),
+        #enhancer=ShortSentenceEnhancer(llm_callable, temperature=args.temperature),
+        tracer=tracer,
     )
 
     # Run pipeline
@@ -265,6 +274,9 @@ def main() -> None:
     except Exception as e:
         print(f"Error processing text: {e}", file=sys.stderr)
         sys.exit(1)
+    finally:
+        if tracer:
+            print(tracer.format(), file=sys.stderr)
 
     # Generate output filename with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -275,7 +287,7 @@ def main() -> None:
     report_html = generate_html_report(result, text, input_path)
     output_file.write_text(report_html, encoding="utf-8")
 
-    print(f"✓ Results saved to '{output_file}'")
+    print(f"Results saved to '{output_file}'")
     print(f"  - Sentences: {len(result.sentences)}")
     print(f"  - Groups: {len(result.groups)}")
 
