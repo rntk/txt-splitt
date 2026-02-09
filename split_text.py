@@ -14,13 +14,14 @@ sys.path.append(str(Path(__file__).parent / "src"))
 from txt_splitt import (
     BracketMarker,
     DenseRegexSentenceSplitter,
+    LLMCallable,
+    LLMRepairingGapHandler,
     NormalizingSplitter,
     Pipeline,
-    LLMRepairingGapHandler,
-    Tracer,
-    TracingLLMCallable,
     TopicRangeLLM,
     TopicRangeParser,
+    Tracer,
+    TracingLLMCallable,
 )
 from txt_splitt.llms.llamacpp import LLamaCPP
 
@@ -244,10 +245,10 @@ def main() -> None:
     llm_adapter = LLamaCPPAdapter(llm_client)
 
     # Set up tracing if requested
-    tracer = Tracer() if args.trace else None
-    llm_callable = (
-        TracingLLMCallable(llm_adapter, tracer) if args.trace else llm_adapter
-    )
+    tracer: Tracer | None = Tracer() if args.trace else None
+    llm_callable: LLMCallable = llm_adapter
+    if tracer is not None:
+        llm_callable = TracingLLMCallable(llm_adapter, tracer)
 
     # Create pipeline
     pipeline = Pipeline(

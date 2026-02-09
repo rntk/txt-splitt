@@ -1,9 +1,9 @@
 import json
-from typing import List, Union, Optional, Dict, Any
 import logging
 import re
-from urllib.parse import urlparse
 from http.client import HTTPConnection, HTTPSConnection
+from typing import List, Union
+from urllib.parse import urlparse
 
 
 class LLamaCPP:
@@ -32,9 +32,10 @@ class LLamaCPP:
         conn.request("POST", "/v1/chat/completions", body, headers)
         res = conn.getresponse()
         resp_body = res.read()
+        resp_body_text = resp_body.decode("utf-8", errors="replace")
         # logging.info("server response: %s", resp_body)
         if res.status != 200:
-            err_msg = f"{res.status} - {res.reason} - {resp_body}"
+            err_msg = f"{res.status} - {res.reason} - {resp_body_text}"
             logging.error(err_msg)
             # Raise exception for 400 status (request too large)
             if res.status == 400:
@@ -52,4 +53,3 @@ class LLamaCPP:
             return HTTPSConnection(self.__host)
         else:
             return HTTPConnection(self.__host)
-
