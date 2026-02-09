@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, final
 
+from txt_splitt.joiners import join_sentences_by_groups
 from txt_splitt.protocols import (
     Enhancer,
     GapHandler,
@@ -106,6 +107,8 @@ class Pipeline:
             if self._joiner is not None:
                 with self._tracer.span("join") as s:
                     groups = self._joiner.join(groups, sentences)
+                    sentences, groups = join_sentences_by_groups(groups, sentences)
+                    s.attributes["sentence_count"] = len(sentences)
                     s.attributes["group_count"] = len(groups)
 
             result = SplitResult(sentences=tuple(sentences), groups=tuple(groups))

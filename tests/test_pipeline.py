@@ -469,6 +469,9 @@ class TestPipeline:
         assert joiner.seen_groups == gap_groups
         assert joiner.seen_sentences == sentences
         assert result.groups[0].label == ("Joined",)
+        assert len(result.sentences) == 1
+        assert result.sentences[0].text == "Sent 0. Sent 1. Sent 2."
+        assert result.groups[0].ranges == (SentenceRange(start=0, end=0),)
 
     def test_pipeline_runs_joiner_after_enhancer(self) -> None:
         sentences = _make_sentences(3)
