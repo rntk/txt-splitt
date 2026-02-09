@@ -17,7 +17,6 @@ from txt_splitt import (
     NormalizingSplitter,
     Pipeline,
     LLMRepairingGapHandler,
-    ShortSentenceEnhancer,
     Tracer,
     TracingLLMCallable,
     TopicRangeLLM,
@@ -263,7 +262,6 @@ def main() -> None:
         gap_handler=LLMRepairingGapHandler(
             llm_callable, temperature=args.temperature, tracer=tracer
         ),
-        #enhancer=ShortSentenceEnhancer(llm_callable, temperature=args.temperature),
         tracer=tracer,
     )
 

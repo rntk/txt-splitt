@@ -58,7 +58,9 @@ class TopicRangeLLM:
 def _build_topic_ranges_prompt(tagged_text: str) -> str:
     return f"""You are analyzing a text where each sentence is prefixed with a
 {{N}} marker.
-Sentence numbers are 0-indexed.
+Sentence marker IDs are globally 0-indexed in the source document.
+The current input may be a chunk, so marker IDs might not start at 0.
+Always use the exact marker IDs shown in <content>.
 IMPORTANT ABOUT FORMAT:
 - Each marker line is an anchor point in the original text, not a guaranteed
   full sentence.
@@ -163,7 +165,7 @@ Technology>Database>PostgreSQL: 0-5, 10-15
 Sport>Football>England: 2, 4, 6-9
 
 SENTENCE RULES:
-- Sentence numbers are 0-indexed
+- Marker IDs are globally 0-indexed and may start at any value in this chunk
 - Every sentence must belong to exactly one keyword group
 - Be granular: separate distinct stories/topics into their own keyword groups
 - Consecutive markers that continue one idea should stay in the same group even
