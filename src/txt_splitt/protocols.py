@@ -1,4 +1,4 @@
-"""Protocol definitions for the 5-stage text splitter pipeline."""
+"""Protocol definitions for the text splitter pipeline."""
 
 from typing import Protocol
 
@@ -62,6 +62,14 @@ class Enhancer(Protocol):
     """Stage 6 (optional): Refine group boundaries for short sentences."""
 
     def enhance(
+        self, groups: list[SentenceGroup], sentences: list[Sentence]
+    ) -> list[SentenceGroup]: ...
+
+
+class GroupJoiner(Protocol):
+    """Stage 7 (optional): Join adjacent groups that belong together."""
+
+    def join(
         self, groups: list[SentenceGroup], sentences: list[Sentence]
     ) -> list[SentenceGroup]: ...
 

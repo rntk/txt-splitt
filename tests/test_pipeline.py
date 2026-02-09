@@ -153,6 +153,27 @@ class FailingEnhancer:
         raise EnhancerError("Enhancement failed")
 
 
+class RecordingJoiner:
+    def __init__(self, groups: list[SentenceGroup]) -> None:
+        self._groups = groups
+        self.seen_groups: list[SentenceGroup] | None = None
+        self.seen_sentences: list[Sentence] | None = None
+
+    def join(
+        self, groups: list[SentenceGroup], sentences: list[Sentence]
+    ) -> list[SentenceGroup]:
+        self.seen_groups = groups
+        self.seen_sentences = sentences
+        return self._groups
+
+
+class FailingJoiner:
+    def join(
+        self, groups: list[SentenceGroup], sentences: list[Sentence]
+    ) -> list[SentenceGroup]:
+        raise RuntimeError("Join failed")
+
+
 class RecordingMarker:
     def __init__(self, result: MarkedText) -> None:
         self._result = result
@@ -406,6 +427,91 @@ class TestPipeline:
             enhancer=FailingEnhancer(),
         )
         with pytest.raises(EnhancerError, match="Enhancement failed"):
+            pipeline.run("text")
+
+    def test_pipeline_with_joiner_none_works(self) -> None:
+        sentences = _make_sentences(3)
+        groups = _make_groups()
+
+        pipeline = Pipeline(
+            splitter=StubSplitter(sentences),
+            marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
+            llm=StubLLM("..."),
+            parser=StubParser(groups),
+            gap_handler=StubGapHandler(groups),
+            joiner=None,
+        )
+        result = pipeline.run("text")
+
+        assert len(result.groups) == 1
+
+    def test_pipeline_with_joiner_calls_join(self) -> None:
+        sentences = _make_sentences(3)
+        gap_groups = _make_groups()
+        joined_groups = [
+            SentenceGroup(
+                label=("Joined",),
+                ranges=(SentenceRange(start=0, end=2),),
+            ),
+        ]
+        joiner = RecordingJoiner(joined_groups)
+
+        pipeline = Pipeline(
+            splitter=StubSplitter(sentences),
+            marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
+            llm=StubLLM("..."),
+            parser=StubParser(gap_groups),
+            gap_handler=StubGapHandler(gap_groups),
+            joiner=joiner,
+        )
+        result = pipeline.run("text")
+
+        assert joiner.seen_groups == gap_groups
+        assert joiner.seen_sentences == sentences
+        assert result.groups[0].label == ("Joined",)
+
+    def test_pipeline_runs_joiner_after_enhancer(self) -> None:
+        sentences = _make_sentences(3)
+        gap_groups = [
+            SentenceGroup(
+                label=("A",),
+                ranges=(SentenceRange(start=0, end=1),),
+            ),
+        ]
+        enhanced_groups = [
+            SentenceGroup(
+                label=("B",),
+                ranges=(SentenceRange(start=0, end=2),),
+            ),
+        ]
+        joiner = RecordingJoiner(enhanced_groups)
+
+        pipeline = Pipeline(
+            splitter=StubSplitter(sentences),
+            marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
+            llm=StubLLM("..."),
+            parser=StubParser(gap_groups),
+            gap_handler=StubGapHandler(gap_groups),
+            enhancer=StubEnhancer(enhanced_groups),
+            joiner=joiner,
+        )
+        pipeline.run("text")
+
+        assert joiner.seen_groups == enhanced_groups
+
+    def test_joiner_error_propagates(self) -> None:
+        sentences = _make_sentences(3)
+        groups = _make_groups()
+
+        pipeline = Pipeline(
+            splitter=StubSplitter(sentences),
+            marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
+            llm=StubLLM("..."),
+            parser=StubParser(groups),
+            gap_handler=StubGapHandler(groups),
+            joiner=FailingJoiner(),
+        )
+        with pytest.raises(RuntimeError, match="Join failed"):
             pipeline.run("text")
 
 
