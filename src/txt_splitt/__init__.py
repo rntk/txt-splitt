@@ -17,7 +17,7 @@ from txt_splitt.gap_handlers import (
     RepairingGapHandler,
     StrictGapHandler,
 )
-from txt_splitt.html_cleaners import TagStripCleaner
+from txt_splitt.html_cleaners import HTMLParserTagStripCleaner, TagStripCleaner
 from txt_splitt.llm import TopicRangeLLM
 from txt_splitt.markers import BracketMarker
 from txt_splitt.normalizers import NormalizingSplitter
@@ -79,6 +79,7 @@ __all__ = [
     "MappingOffsetRestorer",
     "SizeBasedChunker",
     "NormalizingSplitter",
+    "HTMLParserTagStripCleaner",
     "TagStripCleaner",
     "DenseRegexSentenceSplitter",
     "HtmlAwareSentenceSplitter",

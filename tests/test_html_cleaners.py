@@ -2,7 +2,7 @@
 
 import pytest
 
-from txt_splitt.html_cleaners import TagStripCleaner
+from txt_splitt.html_cleaners import HTMLParserTagStripCleaner, TagStripCleaner
 from txt_splitt.types import OffsetMapping, OffsetSegment
 
 
@@ -170,3 +170,30 @@ class TestOffsetMapping:
         for i in range(len(text)):
             assert mapping.to_original(i) == i
         assert mapping.to_original(len(text)) == len(text)
+
+
+class TestHTMLParserTagStripCleaner:
+    def setup_method(self) -> None:
+        self.cleaner = HTMLParserTagStripCleaner()
+
+    def test_basic_tag_removal(self) -> None:
+        text = "Hello <b>world</b> end"
+        clean, mapping = self.cleaner.clean(text)
+        assert clean == "Hello world end"
+        assert mapping.original_length == len(text)
+        assert mapping.clean_length == len(clean)
+
+    def test_preserves_non_tag_angle_brackets(self) -> None:
+        text = "Math: 3 < 10 > 2 and heart <3>"
+        clean, mapping = self.cleaner.clean(text)
+        assert clean == text
+        assert mapping.segments == (
+            OffsetSegment(clean_offset=0, original_offset=0, length=len(text)),
+        )
+        assert mapping.to_original(len(text)) == len(text)
+
+    def test_removes_comment_and_declaration(self) -> None:
+        text = "<!DOCTYPE html><!--x--><p>A</p>"
+        clean, mapping = self.cleaner.clean(text)
+        assert clean == "A"
+        assert mapping.clean_length == 1
