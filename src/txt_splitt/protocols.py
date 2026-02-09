@@ -2,7 +2,13 @@
 
 from typing import Protocol
 
-from txt_splitt.types import MarkedText, Sentence, SentenceGroup
+from txt_splitt.types import (
+    MarkedText,
+    OffsetMapping,
+    Sentence,
+    SentenceGroup,
+    SplitResult,
+)
 
 
 class LLMCallable(Protocol):
@@ -58,3 +64,15 @@ class Enhancer(Protocol):
     def enhance(
         self, groups: list[SentenceGroup], sentences: list[Sentence]
     ) -> list[SentenceGroup]: ...
+
+
+class HtmlCleaner(Protocol):
+    """Stage 0 (optional): Strip HTML tags from input text."""
+
+    def clean(self, text: str) -> tuple[str, OffsetMapping]: ...
+
+
+class OffsetRestorer(Protocol):
+    """Final stage (optional): Restore original-text positions in SplitResult."""
+
+    def restore(self, result: SplitResult, mapping: OffsetMapping) -> SplitResult: ...

@@ -27,3 +27,7 @@ class GapError(SplitterError):
 
 class EnhancerError(SplitterError):
     """Raised when the enhancer stage (stage 6) fails."""
+
+
+class HtmlCleanError(SplitterError):
+    """Raised when HTML cleaning or offset restoration fails."""

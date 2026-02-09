@@ -12,6 +12,8 @@ from txt_splitt.errors import (
 from txt_splitt.pipeline import Pipeline
 from txt_splitt.types import (
     MarkedText,
+    OffsetMapping,
+    OffsetSegment,
     Sentence,
     SentenceGroup,
     SentenceRange,
@@ -405,3 +407,195 @@ class TestPipeline:
         )
         with pytest.raises(EnhancerError, match="Enhancement failed"):
             pipeline.run("text")
+
+
+class StubHtmlCleaner:
+    def __init__(self, clean_text: str, mapping: OffsetMapping) -> None:
+        self._clean_text = clean_text
+        self._mapping = mapping
+        self.seen_text: str | None = None
+
+    def clean(self, text: str) -> tuple[str, OffsetMapping]:
+        self.seen_text = text
+        return self._clean_text, self._mapping
+
+
+class StubOffsetRestorer:
+    def __init__(self) -> None:
+        self.seen_result: SplitResult | None = None
+        self.seen_mapping: OffsetMapping | None = None
+
+    def restore(self, result: SplitResult, mapping: OffsetMapping) -> SplitResult:
+        self.seen_result = result
+        self.seen_mapping = mapping
+        return result
+
+
+class RecordingSplitter:
+    def __init__(self, sentences: list[Sentence]) -> None:
+        self._sentences = sentences
+        self.seen_text: str | None = None
+
+    def split(self, text: str) -> list[Sentence]:
+        self.seen_text = text
+        return self._sentences
+
+
+class TestPipelineHtmlCleaning:
+    def _make_mapping(self) -> OffsetMapping:
+        return OffsetMapping(
+            segments=(OffsetSegment(clean_offset=0, original_offset=0, length=10),),
+            original_length=20,
+            clean_length=10,
+        )
+
+    def test_validation_cleaner_without_restorer_raises(self) -> None:
+        with pytest.raises(ValueError, match="both be provided"):
+            Pipeline(
+                splitter=StubSplitter(_make_sentences(1)),
+                marker=StubMarker(MarkedText(tagged_text=".", sentence_count=1)),
+                llm=StubLLM("x"),
+                parser=StubParser([]),
+                gap_handler=StubGapHandler([]),
+                html_cleaner=StubHtmlCleaner("x", self._make_mapping()),
+            )
+
+    def test_validation_restorer_without_cleaner_raises(self) -> None:
+        with pytest.raises(ValueError, match="both be provided"):
+            Pipeline(
+                splitter=StubSplitter(_make_sentences(1)),
+                marker=StubMarker(MarkedText(tagged_text=".", sentence_count=1)),
+                llm=StubLLM("x"),
+                parser=StubParser([]),
+                gap_handler=StubGapHandler([]),
+                offset_restorer=StubOffsetRestorer(),
+            )
+
+    def test_validation_both_provided_ok(self) -> None:
+        Pipeline(
+            splitter=StubSplitter(_make_sentences(1)),
+            marker=StubMarker(MarkedText(tagged_text=".", sentence_count=1)),
+            llm=StubLLM("x"),
+            parser=StubParser(_make_groups()),
+            gap_handler=StubGapHandler(_make_groups()),
+            html_cleaner=StubHtmlCleaner("x", self._make_mapping()),
+            offset_restorer=StubOffsetRestorer(),
+        )
+
+    def test_splitter_receives_clean_text(self) -> None:
+        clean_text = "Hello world"
+        mapping = OffsetMapping(
+            segments=(OffsetSegment(clean_offset=0, original_offset=0, length=11),),
+            original_length=20,
+            clean_length=11,
+        )
+        sentences = [Sentence(index=0, start=0, end=11, text=clean_text)]
+        groups = _make_groups()
+        splitter = RecordingSplitter(sentences)
+
+        pipeline = Pipeline(
+            splitter=splitter,
+            marker=StubMarker(MarkedText(tagged_text=".", sentence_count=1)),
+            llm=StubLLM("Technology>AI: 0"),
+            parser=StubParser(groups),
+            gap_handler=StubGapHandler(groups),
+            html_cleaner=StubHtmlCleaner(clean_text, mapping),
+            offset_restorer=StubOffsetRestorer(),
+        )
+        pipeline.run("Hello <b>world</b>!!")
+
+        assert splitter.seen_text == clean_text
+
+    def test_marker_receives_clean_text(self) -> None:
+        clean_text = "Hello world"
+        mapping = OffsetMapping(
+            segments=(OffsetSegment(clean_offset=0, original_offset=0, length=11),),
+            original_length=20,
+            clean_length=11,
+        )
+        sentences = [Sentence(index=0, start=0, end=11, text=clean_text)]
+        groups = _make_groups()
+        marker = RecordingMarker(MarkedText(tagged_text=".", sentence_count=1))
+
+        pipeline = Pipeline(
+            splitter=StubSplitter(sentences),
+            marker=marker,
+            llm=StubLLM("Technology>AI: 0"),
+            parser=StubParser(groups),
+            gap_handler=StubGapHandler(groups),
+            html_cleaner=StubHtmlCleaner(clean_text, mapping),
+            offset_restorer=StubOffsetRestorer(),
+        )
+        pipeline.run("Hello <b>world</b>!!")
+
+        assert marker.seen_text == clean_text
+
+    def test_restorer_called_with_result_and_mapping(self) -> None:
+        mapping = self._make_mapping()
+        sentences = _make_sentences(1)
+        groups = _make_groups()
+        restorer = StubOffsetRestorer()
+
+        pipeline = Pipeline(
+            splitter=StubSplitter(sentences),
+            marker=StubMarker(MarkedText(tagged_text=".", sentence_count=1)),
+            llm=StubLLM("Technology>AI: 0"),
+            parser=StubParser(groups),
+            gap_handler=StubGapHandler(groups),
+            html_cleaner=StubHtmlCleaner("clean", mapping),
+            offset_restorer=restorer,
+        )
+        pipeline.run("original <b>text</b>")
+
+        assert restorer.seen_result is not None
+        assert restorer.seen_mapping is mapping
+
+    def test_end_to_end_with_real_cleaner_and_restorer(self) -> None:
+        from txt_splitt.gap_handlers import StrictGapHandler
+        from txt_splitt.html_cleaners import TagStripCleaner
+        from txt_splitt.markers import BracketMarker
+        from txt_splitt.offset_restorers import MappingOffsetRestorer
+        from txt_splitt.parsers import TopicRangeParser
+        from txt_splitt.splitters import RegexSentenceSplitter
+
+        original = "<p>AI is growing fast.</p> <p>Climate change is real.</p>"
+
+        llm_response = "Technology>AI: 0\nScience>Climate: 1"
+
+        pipeline = Pipeline(
+            splitter=RegexSentenceSplitter(),
+            marker=BracketMarker(),
+            llm=StubLLM(llm_response),
+            parser=TopicRangeParser(),
+            gap_handler=StrictGapHandler(),
+            html_cleaner=TagStripCleaner(),
+            offset_restorer=MappingOffsetRestorer(),
+        )
+        result = pipeline.run(original)
+
+        assert len(result.sentences) == 2
+        assert result.sentences[0].text == "AI is growing fast."
+        assert result.sentences[1].text == "Climate change is real."
+        # Offsets should point into the original HTML text
+        assert result.sentences[0].start < result.sentences[0].end
+        assert result.sentences[1].start < result.sentences[1].end
+        # The start of first sentence should skip the <p> tag
+        assert result.sentences[0].start == 3  # after "<p>"
+        assert result.groups[0].label == ("Technology", "AI")
+        assert result.groups[1].label == ("Science", "Climate")
+
+    def test_pipeline_without_html_cleaning_unchanged(self) -> None:
+        sentences = _make_sentences(3)
+        groups = _make_groups()
+
+        pipeline = Pipeline(
+            splitter=StubSplitter(sentences),
+            marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
+            llm=StubLLM("Technology>AI: 0-2"),
+            parser=StubParser(groups),
+            gap_handler=StubGapHandler(groups),
+        )
+        result = pipeline.run("Some text")
+
+        assert len(result.sentences) == 3
+        assert result.groups[0].label == ("Technology", "AI")

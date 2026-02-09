@@ -5,6 +5,7 @@ from txt_splitt.enhancers import ShortSentenceEnhancer
 from txt_splitt.errors import (
     EnhancerError,
     GapError,
+    HtmlCleanError,
     LLMError,
     MarkerError,
     ParseError,
@@ -16,18 +17,22 @@ from txt_splitt.gap_handlers import (
     RepairingGapHandler,
     StrictGapHandler,
 )
+from txt_splitt.html_cleaners import TagStripCleaner
 from txt_splitt.llm import TopicRangeLLM
 from txt_splitt.markers import BracketMarker
 from txt_splitt.normalizers import NormalizingSplitter
+from txt_splitt.offset_restorers import MappingOffsetRestorer
 from txt_splitt.parsers import TopicRangeParser
 from txt_splitt.pipeline import Pipeline
 from txt_splitt.protocols import (
     Enhancer,
     GapHandler,
+    HtmlCleaner,
     LLMCallable,
     LLMStrategy,
     MarkedTextChunker,
     MarkerStrategy,
+    OffsetRestorer,
     ResponseParser,
     SentenceSplitter,
 )
@@ -39,6 +44,8 @@ from txt_splitt.splitters import (
 from txt_splitt.tracer import NoOpSpan, NoOpTracer, Span, Tracer, TracingLLMCallable
 from txt_splitt.types import (
     MarkedText,
+    OffsetMapping,
+    OffsetSegment,
     Sentence,
     SentenceGroup,
     SentenceRange,
@@ -50,6 +57,8 @@ __all__ = [
     "Pipeline",
     # Types
     "MarkedText",
+    "OffsetMapping",
+    "OffsetSegment",
     "Sentence",
     "SentenceGroup",
     "SentenceRange",
@@ -57,16 +66,20 @@ __all__ = [
     # Protocols
     "Enhancer",
     "GapHandler",
+    "HtmlCleaner",
     "LLMCallable",
     "LLMStrategy",
     "MarkedTextChunker",
     "MarkerStrategy",
+    "OffsetRestorer",
     "ResponseParser",
     "SentenceSplitter",
     # Concrete implementations
     "BracketMarker",
+    "MappingOffsetRestorer",
     "SizeBasedChunker",
     "NormalizingSplitter",
+    "TagStripCleaner",
     "DenseRegexSentenceSplitter",
     "HtmlAwareSentenceSplitter",
     "RegexSentenceSplitter",
@@ -85,6 +98,7 @@ __all__ = [
     # Errors
     "EnhancerError",
     "GapError",
+    "HtmlCleanError",
     "LLMError",
     "MarkerError",
     "ParseError",
