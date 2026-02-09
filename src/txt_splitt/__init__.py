@@ -31,7 +31,11 @@ from txt_splitt.protocols import (
     ResponseParser,
     SentenceSplitter,
 )
-from txt_splitt.splitters import DenseRegexSentenceSplitter, RegexSentenceSplitter
+from txt_splitt.splitters import (
+    DenseRegexSentenceSplitter,
+    HtmlAwareSentenceSplitter,
+    RegexSentenceSplitter,
+)
 from txt_splitt.tracer import NoOpSpan, NoOpTracer, Span, Tracer, TracingLLMCallable
 from txt_splitt.types import (
     MarkedText,
@@ -64,6 +68,7 @@ __all__ = [
     "SizeBasedChunker",
     "NormalizingSplitter",
     "DenseRegexSentenceSplitter",
+    "HtmlAwareSentenceSplitter",
     "RegexSentenceSplitter",
     "ShortSentenceEnhancer",
     "LLMRepairingGapHandler",
