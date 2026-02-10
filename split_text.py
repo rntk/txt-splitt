@@ -13,12 +13,16 @@ from typing import Any
 sys.path.append(str(Path(__file__).parent / "src"))
 
 from txt_splitt import (
+    AdjacentSameTopicJoiner,
     BracketMarker,
     DenseRegexSentenceSplitter,
     LLMCallable,
     LLMRepairingGapHandler,
+    MappingOffsetRestorer,
     NormalizingSplitter,
     Pipeline,
+    SizeBasedChunker,
+    TagStripCleaner,
     TopicRangeLLM,
     TopicRangeParser,
     Tracer,
@@ -238,7 +242,13 @@ def main() -> None:
         "--anchor-words",
         type=int,
         default=5,
-        help="Add a marker anchor roughly every N words (default: 22)",
+        help="Add a marker anchor roughly every N words (default: 5)",
+    )
+    parser.add_argument(
+        "--max-chunk-chars",
+        type=int,
+        default=84000,
+        help="Max characters per LLM chunk (default: 84000)",
     )
     parser.add_argument(
         "--trace",
@@ -265,19 +275,34 @@ def main() -> None:
     if tracer is not None:
         llm_callable = TracingLLMCallable(llm_adapter, tracer)
 
+    splitter = NormalizingSplitter(
+        DenseRegexSentenceSplitter(anchor_every_words=args.anchor_words),
+        min_length=20,
+        max_length=260,
+    )
+    max_chunk_chars = args.max_chunk_chars
+    html_cleaner = None
+    offset_restorer = None
+    if input_path.suffix.lower() in {".html", ".htm"}:
+        html_cleaner = TagStripCleaner()
+        offset_restorer = MappingOffsetRestorer()
+
     # Create pipeline
     pipeline = Pipeline(
-        splitter=NormalizingSplitter(
-            DenseRegexSentenceSplitter(anchor_every_words=args.anchor_words),
-            min_length=20,
-            max_length=260,
-        ),
+        splitter=splitter,
         marker=BracketMarker(),
-        llm=TopicRangeLLM(llm_callable, temperature=args.temperature),
+        llm=TopicRangeLLM(
+            client=llm_callable,
+            temperature=0.0,
+            chunker=SizeBasedChunker(max_chars=max_chunk_chars),
+        ),
         parser=TopicRangeParser(),
         gap_handler=LLMRepairingGapHandler(
-            llm_callable, temperature=args.temperature, tracer=tracer
+            llm_callable, temperature=0.0, tracer=tracer
         ),
+        joiner=AdjacentSameTopicJoiner(),
+        html_cleaner=html_cleaner,
+        offset_restorer=offset_restorer,
         tracer=tracer,
     )
 
