@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import TypeAlias
+
 from txt_splitt.errors import GapError
 from txt_splitt.protocols import LLMCallable
 from txt_splitt.tracer import NoOpSpan, NoOpTracer, Span, Tracer
@@ -10,9 +12,9 @@ from txt_splitt.types import Sentence, SentenceGroup, SentenceRange
 _CONTEXT_SIZE = 3
 _DEFAULT_NEW_TOPIC = ("Uncategorized",)
 
-type OwnerId = int | str
-type TracingSpan = Span | NoOpSpan
-type GapTracer = Tracer | NoOpTracer
+OwnerId: TypeAlias = int | str
+TracingSpan: TypeAlias = Span | NoOpSpan
+GapTracer: TypeAlias = Tracer | NoOpTracer
 
 
 class StrictGapHandler:

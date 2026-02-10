@@ -3,8 +3,18 @@ name = "txt_splitt"
 version = "0.1.0"
 description = "A python package to split text"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.10"
 dependencies = []
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Intended Audience :: Developers",
+    "Topic :: Text Processing",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -20,9 +30,24 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/txt_splitt"]
 
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/txt_splitt",
+    "tests",
+    "README.md",
+    "pyproject.toml",
+]
+
+[tool.hatch.build]
+exclude = [
+    "**/__pycache__",
+    "**/*.pyc",
+    "**/*.pyo",
+]
+
 [tool.ruff]
 line-length = 88
-target-version = "py314"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "SIM"]

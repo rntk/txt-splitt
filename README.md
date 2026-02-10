@@ -2,6 +2,21 @@
 
 A python package to split text.
 
+## Installation
+
+Install from a GitHub URL:
+
+```bash
+pip install "git+https://github.com/rntk/txt-splitt.git"
+```
+
+Install a specific tag or branch:
+
+```bash
+pip install "git+https://github.com/rntk/txt-splitt.git@v0.1.0"
+pip install "git+https://github.com/rntk/txt-splitt.git@main"
+```
+
 ## Development with Docker
 
 Prerequisites:
