@@ -130,6 +130,28 @@ def generate_html_report(result: Any, source_text: str, input_file: Path) -> str
         "            font-size: 0.9rem;",
         "        }",
         "        .sentence-text { display: inline; }",
+        "        .sentence-tabs { margin-top: 10px; }",
+        "        .tab-buttons {",
+        "            display: inline-flex;",
+        "            gap: 6px;",
+        "            border-bottom: 1px solid #e0e0e0;",
+        "            margin-bottom: 8px;",
+        "        }",
+        "        .tab-button {",
+        "            background: transparent;",
+        "            border: none;",
+        "            padding: 6px 10px;",
+        "            cursor: pointer;",
+        "            font-size: 0.85rem;",
+        "            color: #2c3e50;",
+        "            border-bottom: 2px solid transparent;",
+        "        }",
+        "        .tab-button.active {",
+        "            border-bottom-color: #3498db;",
+        "            font-weight: 600;",
+        "        }",
+        "        .tab-panel { display: none; }",
+        "        .tab-panel.active { display: block; }",
         "        .original-file {",
         "            background: #fff;",
         "            border-radius: 8px;",
@@ -204,21 +226,71 @@ def generate_html_report(result: Any, source_text: str, input_file: Path) -> str
             for sentence_index in range(start, end + 1):
                 if sentence_index in sentence_map:
                     sentence = sentence_map[sentence_index]
+                    original_slice = source_text[
+                        int(sentence["start"]) : int(sentence["end"])
+                    ]
                     html_content.append("            <li class='sentence-item'>")
                     html_content.append(
                         "                <span class='sentence-index'>"
                         f"#{int(sentence['index'])}</span>"
                     )
+                    html_content.append("                <div class='sentence-tabs'>")
+                    html_content.append("                    <div class='tab-buttons'>")
                     html_content.append(
-                        "                <span class='sentence-text'>"
-                        f"{escape(str(sentence['text']))}</span>"
+                        "                        <button class='tab-button active' "
+                        "data-tab='result'>Result</button>"
                     )
+                    html_content.append(
+                        "                        <button class='tab-button' "
+                        "data-tab='original'>Original</button>"
+                    )
+                    html_content.append("                    </div>")
+                    html_content.append(
+                        "                    <div class='tab-panel active' "
+                        "data-tab-panel='result'>"
+                        f"<span class='sentence-text'>{escape(str(sentence['text']))}</span>"
+                        "</div>"
+                    )
+                    html_content.append(
+                        "                    <div class='tab-panel' "
+                        "data-tab-panel='original'>"
+                        f"<span class='sentence-text'>{escape(original_slice)}</span>"
+                        "</div>"
+                    )
+                    html_content.append("                </div>")
                     html_content.append("            </li>")
 
         html_content.append("        </ul>")
         html_content.append("    </div>")
 
-    html_content.extend(["</body>", "</html>"])
+    html_content.extend(
+        [
+            "    <script>",
+            "        document.addEventListener('click', (event) => {",
+            "            const button = event.target.closest('.tab-button');",
+            "            if (!button) {",
+            "                return;",
+            "            }",
+            "            const tabName = button.getAttribute('data-tab');",
+            "            const tabs = button.closest('.sentence-tabs');",
+            "            if (!tabs || !tabName) {",
+            "                return;",
+            "            }",
+            "            tabs.querySelectorAll('.tab-button').forEach((btn) => {",
+            "                btn.classList.toggle('active', btn === button);",
+            "            });",
+            "            tabs.querySelectorAll('.tab-panel').forEach((panel) => {",
+            "                panel.classList.toggle(",
+            "                    'active',",
+            "                    panel.getAttribute('data-tab-panel') === tabName",
+            "                );",
+            "            });",
+            "        });",
+            "    </script>",
+            "</body>",
+            "</html>",
+        ]
+    )
     return "\n".join(html_content)
 
 
