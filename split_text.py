@@ -2,6 +2,7 @@
 """Simple script to split text using LLamaCPP client and txt_splitt pipeline."""
 
 import argparse
+import json
 import sys
 from datetime import datetime
 from html import escape
@@ -62,6 +63,7 @@ def result_to_dict(result: Any) -> dict[str, Any]:
 def generate_html_report(result: Any, source_text: str, input_file: Path) -> str:
     """Generate HTML report content from split result."""
     data = result_to_dict(result)
+    json_payload = json.dumps(data, indent=2)
     sentences: list[dict[str, Any]] = data.get("sentences", [])
     groups: list[dict[str, Any]] = data.get("groups", [])
 
@@ -132,6 +134,15 @@ def generate_html_report(result: Any, source_text: str, input_file: Path) -> str
         "            padding: 20px;",
         "            border: 1px solid #e0e0e0;",
         "        }",
+        "        .json-block {",
+        "            background: #fff;",
+        "            border-radius: 8px;",
+        "            box-shadow: 0 2px 4px rgba(0,0,0,0.1);",
+        "            margin-bottom: 30px;",
+        "            padding: 20px;",
+        "            border: 1px solid #e0e0e0;",
+        "        }",
+        "        .json-block h2 { margin-top: 0; color: #2c3e50; }",
         "        .original-file h2 { margin-top: 0; color: #2c3e50; }",
         "        pre {",
         "            background: #f8f9fa;",
@@ -160,6 +171,10 @@ def generate_html_report(result: Any, source_text: str, input_file: Path) -> str
         "    <div class='original-file'>",
         f"        <h2>Original File: {escape(input_file.name)}</h2>",
         f"        <pre><code>{escape(source_text)}</code></pre>",
+        "    </div>",
+        "    <div class='json-block'>",
+        "        <h2>Pipeline JSON</h2>",
+        f"        <pre><code>{escape(json_payload)}</code></pre>",
         "    </div>",
     ]
 
