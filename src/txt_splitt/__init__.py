@@ -1,6 +1,6 @@
 """txt_splitt - A modular, pipeline-based text splitter."""
 
-from txt_splitt.chunkers import SizeBasedChunker
+from txt_splitt.chunkers import OverlapChunker, SizeBasedChunker
 from txt_splitt.enhancers import ShortSentenceEnhancer
 from txt_splitt.errors import (
     EnhancerError,
@@ -80,6 +80,7 @@ __all__ = [
     # Concrete implementations
     "BracketMarker",
     "MappingOffsetRestorer",
+    "OverlapChunker",
     "SizeBasedChunker",
     "NormalizingSplitter",
     "HTMLParserTagStripCleaner",
