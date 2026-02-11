@@ -197,3 +197,104 @@ class TestHTMLParserTagStripCleaner:
         clean, mapping = self.cleaner.clean(text)
         assert clean == "A"
         assert mapping.clean_length == 1
+
+
+class _StripTagsMixin:
+    """Shared strip_tags tests, parameterised via ``_make_cleaner``."""
+
+    def _make_cleaner(
+        self, strip_tags: set[str] | None = None
+    ) -> TagStripCleaner | HTMLParserTagStripCleaner:
+        raise NotImplementedError
+
+    def test_strip_script_content(self) -> None:
+        c = self._make_cleaner(strip_tags={"script"})
+        text = "<p>Hello</p><script>var x=1;</script><p>World</p>"
+        clean, mapping = c.clean(text)
+        assert clean == "HelloWorld"
+        assert mapping.original_length == len(text)
+        assert mapping.clean_length == len(clean)
+
+    def test_strip_style_content(self) -> None:
+        c = self._make_cleaner(strip_tags={"style"})
+        text = "<style>.a{color:red}</style><div>Text</div>"
+        clean, mapping = c.clean(text)
+        assert clean == "Text"
+
+    def test_strip_multiple_tag_types(self) -> None:
+        c = self._make_cleaner(strip_tags={"script", "style"})
+        text = "<style>css</style><p>Keep</p><script>js</script>"
+        clean, mapping = c.clean(text)
+        assert clean == "Keep"
+
+    def test_strip_nested_html_in_script(self) -> None:
+        c = self._make_cleaner(strip_tags={"script"})
+        text = "<script><div>ignored</div></script><p>kept</p>"
+        clean, mapping = c.clean(text)
+        assert clean == "kept"
+
+    def test_default_strip_tags_none(self) -> None:
+        c = self._make_cleaner()
+        text = "<script>var x=1;</script>"
+        clean, _ = c.clean(text)
+        assert clean == "var x=1;"  # content preserved when strip_tags is None
+
+    def test_strip_tag_with_attributes(self) -> None:
+        c = self._make_cleaner(strip_tags={"script"})
+        text = '<script type="text/javascript">code</script>Text'
+        clean, mapping = c.clean(text)
+        assert clean == "Text"
+
+    def test_strip_preserves_surrounding_text(self) -> None:
+        c = self._make_cleaner(strip_tags={"style"})
+        text = "Before<style>css</style>After"
+        clean, mapping = c.clean(text)
+        assert clean == "BeforeAfter"
+        total_seg_length = sum(seg.length for seg in mapping.segments)
+        assert total_seg_length == mapping.clean_length
+
+    def test_offset_roundtrip_with_strip(self) -> None:
+        c = self._make_cleaner(strip_tags={"script"})
+        # A  B  <script>ignored</script>  C  D
+        # 0  1  2.......................25 26 27
+        text = "AB<script>ignored</script>CD"
+        clean, mapping = c.clean(text)
+        assert clean == "ABCD"
+        assert mapping.to_original(0) == 0  # A
+        assert mapping.to_original(1) == 1  # B
+        assert mapping.to_original(2) == 26  # C
+        assert mapping.to_original(3) == 27  # D
+        assert mapping.to_original(4) == 28  # end
+
+    def test_mapping_lengths_consistent_with_strip(self) -> None:
+        c = self._make_cleaner(strip_tags={"script", "style"})
+        text = "Hello <style>css</style><em>world</em><script>js</script>!"
+        clean, mapping = c.clean(text)
+        total_seg = sum(s.length for s in mapping.segments)
+        assert total_seg == mapping.clean_length
+        assert mapping.clean_length == len(clean)
+        assert mapping.original_length == len(text)
+
+
+class TestTagStripCleanerStripTags(_StripTagsMixin):
+    def _make_cleaner(self, strip_tags: set[str] | None = None) -> TagStripCleaner:
+        return TagStripCleaner(strip_tags=strip_tags)
+
+
+class TestHTMLParserTagStripCleanerStripTags(_StripTagsMixin):
+    def _make_cleaner(
+        self, strip_tags: set[str] | None = None
+    ) -> HTMLParserTagStripCleaner:
+        return HTMLParserTagStripCleaner(strip_tags=strip_tags)
+
+    def test_strip_self_closing_tag_does_not_stick(self) -> None:
+        c = self._make_cleaner(strip_tags={"style"})
+        text = "<style/>A<b>B</b>"
+        clean, _ = c.clean(text)
+        assert clean == "AB"
+
+    def test_strip_unclosed_tag_to_end_of_input(self) -> None:
+        c = self._make_cleaner(strip_tags={"script"})
+        text = "X<script>bad<p>Y</p>"
+        clean, _ = c.clean(text)
+        assert clean == "X"
