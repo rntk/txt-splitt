@@ -23,7 +23,8 @@ class TestRepairingGapHandler:
             ),
         ]
         result = self.handler.handle(groups, sentence_count=5)
-        # Gap at 2 (0-2 then 3-4, wait 0,1,2 is 3 sentences. 3,4 is 2 sentences. Total 5. No gap.)
+        # Gap at 2? No: (0-2) and (3-4) fully cover 0..4.
+        # 0,1,2 is 3 sentences and 3,4 is 2 sentences, total 5.
         # Wait, start=0, end=2 is sentences 0, 1, 2.
         # start=3, end=4 is sentences 3, 4.
         # Total coverage 0-4. Correct.
@@ -115,22 +116,23 @@ class TestRepairingGapHandler:
         ]
         # Sentence count 10 (indices 0-9)
         result = self.handler.handle(groups, sentence_count=10)
-        
+
         # A: (2,3) -> was gap at 0,1. Pull A to (0,3).
         # next_expected = 4.
         # B: (6,8) -> gap at 4,5. Pull A to (0,5).
         # B starts at 6, ends at 8. next_expected = 9.
-        # C: (7,8) -> overlap. start = max(7, 9) = 9. end = 8. start > end, discard C range.
-        # But wait, does B cover the end gap at 9? 
+        # C: (7,8) -> overlap. start = max(7, 9) = 9. end = 8.
+        # start > end, discard C range.
+        # But wait, does B cover the end gap at 9?
         # Actually next_expected=9, max_index=9. next_expected <= max_index is true.
         # last_added was B (since C's range was discarded).
         # Extend B to end (9).
-        
+
         # Result should be:
         # A: [(0, 5)]
         # B: [(6, 9)]
         # C: discarded (no ranges left)
-        
+
         assert len(result) == 2
         assert result[0].label == ("A",)
         assert result[0].ranges == (SentenceRange(start=0, end=5),)

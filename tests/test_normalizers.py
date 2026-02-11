@@ -12,10 +12,10 @@ from txt_splitt.normalizers import (
 from txt_splitt.splitters import RegexSentenceSplitter
 from txt_splitt.types import Sentence
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make(index: int, start: int, text: str) -> Sentence:
     """Shortcut to build a Sentence with correct end offset."""
@@ -27,7 +27,7 @@ def _assert_offsets(sentences: list[Sentence], text: str) -> None:
     for s in sentences:
         assert text[s.start : s.end] == s.text, (
             f"Offset mismatch for index {s.index}: "
-            f"text[{s.start}:{s.end}]={text[s.start:s.end]!r} != {s.text!r}"
+            f"text[{s.start}:{s.end}]={text[s.start : s.end]!r} != {s.text!r}"
         )
 
 
@@ -59,7 +59,10 @@ class TestNormalizingSplitterInit:
 
 class TestMergeShort:
     def test_no_short_sentences_unchanged(self) -> None:
-        text = "This is a reasonably long sentence one. This is a reasonably long sentence two."
+        text = (
+            "This is a reasonably long sentence one. "
+            "This is a reasonably long sentence two."
+        )
         sents = [
             _make(0, 0, "This is a reasonably long sentence one."),
             _make(1, 40, "This is a reasonably long sentence two."),
@@ -68,7 +71,10 @@ class TestMergeShort:
         assert len(result) == 2
 
     def test_short_sentence_merged_with_previous(self) -> None:
-        text = "This is a normal length sentence here. OK. Another normal sentence follows."
+        text = (
+            "This is a normal length sentence here. "
+            "OK. Another normal sentence follows."
+        )
         sents = RegexSentenceSplitter().split(text)
         result = _merge_short(sents, text, min_length=20)
         # "OK." is short → merges with previous
@@ -103,7 +109,8 @@ class TestMergeShort:
         text = "A. B. C."
         sents = RegexSentenceSplitter().split(text)
         result = _merge_short(sents, text, min_length=20)
-        # First is short → pending. Merges with second. Result still short → merges with third.
+        # First is short -> pending. Merges with second.
+        # Result still short -> merges with third.
         # Actually: pending "A." merges with "B." (result: "A. B.").
         # Then "C." is short → merges with previous "A. B." → result "A. B. C."
         assert len(result) == 1
@@ -114,7 +121,8 @@ class TestMergeShort:
         assert result == []
 
     def test_merged_text_from_original(self) -> None:
-        # Ensure merged text is sliced from original, including inter-sentence whitespace
+        # Ensure merged text is sliced from original,
+        # including inter-sentence whitespace.
         text = "Yes.\n\nThis is the next paragraph with enough length."
         sents = RegexSentenceSplitter().split(text)
         assert len(sents) == 2
@@ -146,15 +154,22 @@ class TestSplitLong:
         _assert_offsets(result, text)
 
     def test_split_at_comma_conjunction(self) -> None:
-        text = "This is the first long clause of the sentence, and this is the second equally long clause"
+        text = (
+            "This is the first long clause of the sentence, "
+            "and this is the second equally long clause"
+        )
         sents = [_make(0, 0, text)]
         result = _split_long(sents, text, max_length=60)
         assert len(result) == 2
-        # Split happens after ", and " — the comma+conjunction pattern returns match.end()
+        # Split happens after ", and ":
+        # the comma+conjunction pattern returns match.end().
         _assert_offsets(result, text)
 
     def test_split_at_comma(self) -> None:
-        text = "No semicolons here, just a comma separating two reasonably long parts of this text"
+        text = (
+            "No semicolons here, just a comma separating two "
+            "reasonably long parts of this text"
+        )
         sents = [_make(0, 0, text)]
         result = _split_long(sents, text, max_length=50)
         assert len(result) >= 2
@@ -183,7 +198,17 @@ class TestSplitLong:
         result = _split_long(sents, text, max_length=30)
         # All original content should be recoverable from the pieces
         reconstructed = " ".join(s.text for s in result)
-        for word in ["Alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india"]:
+        for word in [
+            "Alpha",
+            "bravo",
+            "charlie",
+            "delta",
+            "echo",
+            "foxtrot",
+            "golf",
+            "hotel",
+            "india",
+        ]:
             assert word in reconstructed
 
 
@@ -251,7 +276,11 @@ class TestNormalizingSplitterIntegration:
         short = "Ok."
         medium = "This is a medium length sentence here."
         # Build a long sentence > 100 chars
-        long_sent = "This is a very long sentence that keeps going, and going, and going, and going until it exceeds the maximum character limit we set"
+        long_sent = (
+            "This is a very long sentence that keeps going, and going, "
+            "and going, and going until it exceeds the maximum "
+            "character limit we set"
+        )
         text = f"{short} {medium} {long_sent}."
         result = self.splitter.split(text)
         # "Ok." should merge, long sentence should split
@@ -262,7 +291,6 @@ class TestNormalizingSplitterIntegration:
 
     def test_protocol_compatible(self) -> None:
         """NormalizingSplitter satisfies SentenceSplitter protocol."""
-        from txt_splitt.protocols import SentenceSplitter
 
         splitter = NormalizingSplitter(RegexSentenceSplitter())
         # Structural typing — just verify the method exists and works
@@ -295,7 +323,7 @@ class TestNormalizingSplitterIntegration:
         raw = inner.split(text)
         normalized = wrapper.split(text)
         assert len(raw) == len(normalized)
-        for r, n in zip(raw, normalized):
+        for r, n in zip(raw, normalized, strict=True):
             assert r.text == n.text
             assert r.start == n.start
             assert r.end == n.end

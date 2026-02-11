@@ -1,7 +1,5 @@
 """Enhancer implementations for refining group boundaries."""
 
-import logging
-
 from txt_splitt.errors import EnhancerError
 from txt_splitt.protocols import LLMCallable
 from txt_splitt.types import Sentence, SentenceGroup, SentenceRange

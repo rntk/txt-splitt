@@ -14,7 +14,9 @@ from txt_splitt.types import Sentence, SentenceGroup, SentenceRange
 
 
 def _make_sentence(index: int, text: str) -> Sentence:
-    return Sentence(index=index, start=index * 50, end=index * 50 + len(text), text=text)
+    return Sentence(
+        index=index, start=index * 50, end=index * 50 + len(text), text=text
+    )
 
 
 def _all_covered_indices(groups: list[SentenceGroup]) -> set[int]:
@@ -122,7 +124,7 @@ class TestShortSentenceEnhancer:
             SentenceGroup(label=("Technology",), ranges=(SentenceRange(0, 0),)),
         ]
 
-        result = self.enhancer.enhance(groups, sentences)
+        self.enhancer.enhance(groups, sentences)
 
         self.client.call.assert_not_called()
 
@@ -138,7 +140,8 @@ class TestShortSentenceEnhancer:
             SentenceGroup(label=("Science",), ranges=(SentenceRange(2, 2),)),
         ]
         # First candidate: sentence 1 (short) at boundary 0|1 → LLM says PREVIOUS
-        # Second candidate: sentence 1 (short) at boundary 1|2 → skipped (already reassigned)
+        # Second candidate: sentence 1 (short) at boundary 1|2
+        # skipped (already reassigned).
         self.client.call.return_value = "PREVIOUS"
 
         result = self.enhancer.enhance(groups, sentences)
@@ -219,24 +222,29 @@ class TestShortSentenceEnhancer:
 
     def test_custom_min_length_threshold(self) -> None:
         sentences = [
-            _make_sentence(0, "This is a fairly long sentence about artificial intelligence."),
+            _make_sentence(
+                0, "This is a fairly long sentence about artificial intelligence."
+            ),
             _make_sentence(1, "A medium-length sentence here."),  # 30 chars
-            _make_sentence(2, "Climate change is a major global concern right now today."),
+            _make_sentence(
+                2, "Climate change is a major global concern right now today."
+            ),
         ]
         groups = [
             SentenceGroup(label=("Technology",), ranges=(SentenceRange(0, 1),)),
             SentenceGroup(label=("Science",), ranges=(SentenceRange(2, 2),)),
         ]
 
-        # With min_length=20 (default for this test class), 30-char sentence is not short
-        result = self.enhancer.enhance(groups, sentences)
+        # With min_length=20 (default for this test class),
+        # 30-char sentence is not short.
+        self.enhancer.enhance(groups, sentences)
         self.client.call.assert_not_called()
 
         # With min_length=50, 30-char sentence IS short (but 56+ char sentences are not)
         client2 = MagicMock()
         client2.call.return_value = "NEXT"
         enhancer50 = ShortSentenceEnhancer(client2, min_length=50)
-        result = enhancer50.enhance(groups, sentences)
+        enhancer50.enhance(groups, sentences)
         client2.call.assert_called_once()
 
     def test_custom_temperature_forwarded(self) -> None:

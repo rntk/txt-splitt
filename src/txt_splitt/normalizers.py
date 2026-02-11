@@ -36,7 +36,8 @@ class NormalizingSplitter:
     ) -> None:
         if max_length <= min_length:
             raise ValueError(
-                f"max_length ({max_length}) must be greater than min_length ({min_length})"
+                f"max_length ({max_length}) must be greater than "
+                f"min_length ({min_length})"
             )
         self._inner = inner
         self._min_length = min_length
@@ -122,9 +123,7 @@ def _split_long(
     return result
 
 
-def _split_single(
-    sent: Sentence, text: str, max_length: int
-) -> list[Sentence]:
+def _split_single(sent: Sentence, text: str, max_length: int) -> list[Sentence]:
     """Recursively split a single sentence until all pieces are within *max_length*."""
     if len(sent.text) <= max_length:
         return [sent]
@@ -148,10 +147,10 @@ def _split_single(
         return [sent]  # degenerate split
 
     first = Sentence(
-        index=0, start=sent.start, end=first_end, text=text[sent.start:first_end]
+        index=0, start=sent.start, end=first_end, text=text[sent.start : first_end]
     )
     second = Sentence(
-        index=0, start=second_start, end=sent.end, text=text[second_start:sent.end]
+        index=0, start=second_start, end=sent.end, text=text[second_start : sent.end]
     )
 
     return _split_single(first, text, max_length) + _split_single(

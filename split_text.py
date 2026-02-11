@@ -15,12 +15,12 @@ sys.path.append(str(Path(__file__).parent / "src"))
 from txt_splitt import (
     AdjacentSameTopicJoiner,
     BracketMarker,
-    SparseRegexSentenceSplitter,
     LLMCallable,
     LLMRepairingGapHandler,
     MappingOffsetRestorer,
-    Pipeline,
     OverlapChunker,
+    Pipeline,
+    SparseRegexSentenceSplitter,
     TagStripCleaner,
     TopicRangeLLM,
     TopicRangeParser,
@@ -228,6 +228,7 @@ def generate_html_report(result: Any, source_text: str, input_file: Path) -> str
                     original_slice = source_text[
                         int(sentence["start"]) : int(sentence["end"])
                     ]
+                    sentence_text = escape(str(sentence["text"]))
                     html_content.append("            <li class='sentence-item'>")
                     html_content.append(
                         "                <span class='sentence-index'>"
@@ -247,7 +248,7 @@ def generate_html_report(result: Any, source_text: str, input_file: Path) -> str
                     html_content.append(
                         "                    <div class='tab-panel active' "
                         "data-tab-panel='result'>"
-                        f"<span class='sentence-text'>{escape(str(sentence['text']))}</span>"
+                        f"<span class='sentence-text'>{sentence_text}</span>"
                         "</div>"
                     )
                     html_content.append(

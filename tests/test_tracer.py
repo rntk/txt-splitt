@@ -1,7 +1,5 @@
 """Tests for the tracer module."""
 
-import time
-
 import pytest
 
 from txt_splitt.pipeline import Pipeline
@@ -11,7 +9,6 @@ from txt_splitt.types import (
     Sentence,
     SentenceGroup,
     SentenceRange,
-    SplitResult,
 )
 
 
@@ -47,9 +44,8 @@ class TestNoOpTracer:
         from txt_splitt.tracer import NoOpTracer
 
         tracer = NoOpTracer()
-        with tracer.span("parent"):
-            with tracer.span("child"):
-                pass
+        with tracer.span("parent"), tracer.span("child"):
+            pass
         # NoOpTracer doesn't collect anything
         assert tracer.format() == ""
 
@@ -93,10 +89,8 @@ class TestTracer:
 
     def test_deeply_nested(self) -> None:
         tracer = Tracer()
-        with tracer.span("a"):
-            with tracer.span("b"):
-                with tracer.span("c"):
-                    pass
+        with tracer.span("a"), tracer.span("b"), tracer.span("c"):
+            pass
         c = tracer.spans[0].children[0].children[0]
         assert c.name == "c"
 
@@ -110,16 +104,14 @@ class TestTracer:
 
     def test_span_closed_on_exception(self) -> None:
         tracer = Tracer()
-        with pytest.raises(ValueError):
-            with tracer.span("failing"):
-                raise ValueError("boom")
+        with pytest.raises(ValueError), tracer.span("failing"):
+            raise ValueError("boom")
         assert tracer.spans[0].end_time is not None
 
     def test_format_output(self) -> None:
         tracer = Tracer()
-        with tracer.span("parent", x=1):
-            with tracer.span("child", y="hello"):
-                pass
+        with tracer.span("parent", x=1), tracer.span("child", y="hello"):
+            pass
         output = tracer.format()
         assert "[TRACE] parent" in output
         assert "x: 1" in output
@@ -244,11 +236,7 @@ class TestPipelineTracing:
         ]
 
     def _make_groups(self) -> list[SentenceGroup]:
-        return [
-            SentenceGroup(
-                label=("Tech",), ranges=(SentenceRange(start=0, end=2),)
-            )
-        ]
+        return [SentenceGroup(label=("Tech",), ranges=(SentenceRange(start=0, end=2),))]
 
     def test_pipeline_without_tracer(self) -> None:
         sentences = self._make_sentences(3)
