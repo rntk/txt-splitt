@@ -15,13 +15,12 @@ sys.path.append(str(Path(__file__).parent / "src"))
 from txt_splitt import (
     AdjacentSameTopicJoiner,
     BracketMarker,
-    DenseRegexSentenceSplitter,
+    SparseRegexSentenceSplitter,
     LLMCallable,
     LLMRepairingGapHandler,
     MappingOffsetRestorer,
-    NormalizingSplitter,
     Pipeline,
-    SizeBasedChunker,
+    OverlapChunker,
     TagStripCleaner,
     TopicRangeLLM,
     TopicRangeParser,
@@ -347,11 +346,7 @@ def main() -> None:
     if tracer is not None:
         llm_callable = TracingLLMCallable(llm_adapter, tracer)
 
-    splitter = NormalizingSplitter(
-        DenseRegexSentenceSplitter(anchor_every_words=args.anchor_words),
-        min_length=20,
-        max_length=260,
-    )
+    splitter = SparseRegexSentenceSplitter(anchor_every_words=args.anchor_words)
     max_chunk_chars = args.max_chunk_chars
     html_cleaner = None
     offset_restorer = None
@@ -366,7 +361,7 @@ def main() -> None:
         llm=TopicRangeLLM(
             client=llm_callable,
             temperature=0.0,
-            chunker=SizeBasedChunker(max_chars=max_chunk_chars),
+            chunker=OverlapChunker(max_chars=max_chunk_chars),
         ),
         parser=TopicRangeParser(),
         gap_handler=LLMRepairingGapHandler(

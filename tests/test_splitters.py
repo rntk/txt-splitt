@@ -6,6 +6,7 @@ from txt_splitt.splitters import (
     DenseRegexSentenceSplitter,
     HtmlAwareSentenceSplitter,
     RegexSentenceSplitter,
+    SparseRegexSentenceSplitter,
 )
 from txt_splitt.types import Sentence
 
@@ -228,6 +229,88 @@ class TestDenseRegexSentenceSplitterHtmlAware:
     def test_adjacent_tags(self) -> None:
         text = '<span class="a b"></span><div class="c d"> text </div>'
         result = self.splitter.split(text)
+        for s in result:
+            assert text[s.start : s.end] == s.text
+
+
+class TestSparseRegexSentenceSplitter:
+    def setup_method(self) -> None:
+        self.splitter = SparseRegexSentenceSplitter(
+            anchor_every_words=5, long_sentence_word_threshold=10
+        )
+
+    def test_empty_string(self) -> None:
+        assert self.splitter.split("") == []
+
+    def test_splits_on_natural_punctuation_boundaries(self) -> None:
+        text = "Lead: details here; then more. Finally done."
+        result = self.splitter.split(text)
+        assert len(result) == 4
+        assert result[0].text == "Lead:"
+        assert result[1].text == "details here;"
+        assert result[2].text == "then more."
+        assert result[3].text == "Finally done."
+
+    def test_does_not_anchor_short_sentences(self) -> None:
+        text = "one two three four five six seven eight nine ten"
+        result = self.splitter.split(text)
+        assert len(result) == 1
+        assert result[0].text == text
+
+    def test_anchors_only_when_sentence_is_very_long(self) -> None:
+        text = (
+            "one two three four five six seven eight nine ten "
+            "eleven twelve thirteen fourteen"
+        )
+        result = self.splitter.split(text)
+        assert len(result) == 3
+        assert result[0].text == "one two three four five"
+        assert result[1].text == "six seven eight nine ten"
+        assert result[2].text == "eleven twelve thirteen fourteen"
+
+    def test_char_offsets_allow_slicing(self) -> None:
+        text = "A: one two three four five six seven eight nine ten eleven twelve"
+        result = self.splitter.split(text)
+        for s in result:
+            assert text[s.start : s.end] == s.text
+
+    def test_invalid_params_rejected(self) -> None:
+        with pytest.raises(ValueError, match="anchor_every_words must be positive"):
+            SparseRegexSentenceSplitter(anchor_every_words=0)
+        with pytest.raises(
+            ValueError, match="long_sentence_word_threshold must be positive"
+        ):
+            SparseRegexSentenceSplitter(long_sentence_word_threshold=0)
+        with pytest.raises(
+            ValueError,
+            match="long_sentence_word_threshold must be >= anchor_every_words",
+        ):
+            SparseRegexSentenceSplitter(
+                anchor_every_words=10, long_sentence_word_threshold=5
+            )
+
+
+class TestSparseRegexSentenceSplitterHtmlAware:
+    def test_avoids_splitting_on_punctuation_inside_html_tag(self) -> None:
+        splitter = SparseRegexSentenceSplitter(
+            anchor_every_words=5, long_sentence_word_threshold=10, html_aware=True
+        )
+        text = (
+            '<div title="Lead: details; more.">'
+            "alpha beta gamma delta epsilon zeta"
+            "</div>"
+        )
+        result = splitter.split(text)
+        assert len(result) == 1
+        assert result[0].text == text
+
+    def test_anchors_only_for_long_visible_text(self) -> None:
+        splitter = SparseRegexSentenceSplitter(
+            anchor_every_words=3, long_sentence_word_threshold=6, html_aware=True
+        )
+        text = 'w1 w2 w3 <span title="x: y; z."> w4 w5 w6 w7 w8'
+        result = splitter.split(text)
+        assert len(result) == 3
         for s in result:
             assert text[s.start : s.end] == s.text
 

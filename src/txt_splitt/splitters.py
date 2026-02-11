@@ -13,6 +13,9 @@ from txt_splitt.types import Sentence
 # - One or more newlines
 _SENTENCE_BOUNDARY_PATTERN = re.compile(r"((?<=[.!?])\s+(?=[A-ZА-Я]))|(\n+)")
 _DENSE_BOUNDARY_PATTERN = re.compile(r"((?<=[.!?])\s+(?=[A-ZА-Я]))|(\n+)|(\s+[·•|]\s+)")
+_SPARSE_BOUNDARY_PATTERN = re.compile(
+    r"((?<=[.!?])\s+(?=[A-ZА-Я]))|((?<=[;:])\s+)|(\n+)|(\s+[·•|]\s+)|(\s+[—–]\s+)"
+)
 _WORD_PATTERN = re.compile(r"\S+")
 _HTML_TAG_PATTERN = re.compile(r"<(?:[^>\"']|\"[^\"]*\"|'[^']*')*>")
 
@@ -153,6 +156,107 @@ class DenseRegexSentenceSplitter:
         return result
 
 
+class SparseRegexSentenceSplitter:
+    """Split text by natural punctuation boundaries with sparse anchoring.
+
+    Strategy:
+    - Split first on punctuation/newline boundaries that often indicate
+      sentence-like units.
+    - Optional ``html_aware`` mode prevents cuts inside HTML tags.
+    - Only if a resulting span is very long, split it every
+      ``anchor_every_words`` words.
+    """
+
+    def __init__(
+        self,
+        *,
+        anchor_every_words: int = 24,
+        long_sentence_word_threshold: int = 48,
+        html_aware: bool = False,
+    ) -> None:
+        if anchor_every_words <= 0:
+            raise ValueError("anchor_every_words must be positive")
+        if long_sentence_word_threshold <= 0:
+            raise ValueError("long_sentence_word_threshold must be positive")
+        if long_sentence_word_threshold < anchor_every_words:
+            raise ValueError(
+                "long_sentence_word_threshold must be >= anchor_every_words"
+            )
+        self._anchor_every_words = anchor_every_words
+        self._long_sentence_word_threshold = long_sentence_word_threshold
+        self._html_aware = html_aware
+
+    def split(self, text: str) -> list[Sentence]:
+        if not text or not text.strip():
+            return []
+
+        tag_starts: list[int] = []
+        tag_ends: list[int] = []
+        if self._html_aware:
+            tag_starts, tag_ends = _compute_tag_spans(text)
+
+        boundaries = list(_SPARSE_BOUNDARY_PATTERN.finditer(text))
+
+        spans: list[tuple[int, int]] = []
+        start = 0
+
+        for match in boundaries:
+            if self._html_aware and _boundary_overlaps_tag(
+                match.start(),
+                match.end(),
+                tag_starts,
+                tag_ends,
+            ):
+                continue
+            end = match.start()
+            s_start, s_end = _trim_whitespace(text, start, end)
+            if s_start < s_end:
+                spans.append((s_start, s_end))
+            start = match.end()
+
+        s_start, s_end = _trim_whitespace(text, start, len(text))
+        if s_start < s_end:
+            spans.append((s_start, s_end))
+
+        split_spans: list[tuple[int, int]] = []
+        for span_start, span_end in spans:
+            if self._html_aware:
+                split_spans.extend(
+                    _split_span_by_word_anchor_if_long_html_aware(
+                        text,
+                        span_start,
+                        span_end,
+                        self._anchor_every_words,
+                        self._long_sentence_word_threshold,
+                        tag_starts,
+                        tag_ends,
+                    )
+                )
+            else:
+                split_spans.extend(
+                    _split_span_by_word_anchor_if_long(
+                        text,
+                        span_start,
+                        span_end,
+                        self._anchor_every_words,
+                        self._long_sentence_word_threshold,
+                    )
+                )
+
+        result: list[Sentence] = []
+        for index, (seg_start, seg_end) in enumerate(split_spans):
+            result.append(
+                Sentence(
+                    index=index,
+                    start=seg_start,
+                    end=seg_end,
+                    text=text[seg_start:seg_end],
+                )
+            )
+
+        return result
+
+
 def _trim_whitespace(text: str, start: int, end: int) -> tuple[int, int]:
     """Trim leading and trailing whitespace from a text span."""
     while start < end and text[start].isspace():
@@ -193,6 +297,20 @@ def _split_span_by_word_anchor(
         spans.append((s_start, s_end))
 
     return spans if spans else [(start, end)]
+
+
+def _split_span_by_word_anchor_if_long(
+    text: str,
+    start: int,
+    end: int,
+    anchor_every_words: int,
+    long_sentence_word_threshold: int,
+) -> list[tuple[int, int]]:
+    """Split by word anchors only when span word-count exceeds threshold."""
+    word_count = len(list(_WORD_PATTERN.finditer(text, start, end)))
+    if word_count <= long_sentence_word_threshold:
+        return [(start, end)]
+    return _split_span_by_word_anchor(text, start, end, anchor_every_words)
 
 
 def _find_whitespace_cut(text: str, start: int, end: int) -> int | None:
@@ -319,6 +437,32 @@ def _split_span_by_word_anchor_html_aware(
         spans.append((s_start, s_end))
 
     return spans if spans else [(start, end)]
+
+
+def _split_span_by_word_anchor_if_long_html_aware(
+    text: str,
+    start: int,
+    end: int,
+    anchor_every_words: int,
+    long_sentence_word_threshold: int,
+    tag_starts: list[int],
+    tag_ends: list[int],
+) -> list[tuple[int, int]]:
+    """HTML-aware variant that only anchors when non-tag words exceed threshold."""
+    all_matches = list(_WORD_PATTERN.finditer(text, start, end))
+    real_word_count = sum(
+        1 for m in all_matches if not _pos_inside_tag(m.start(), tag_starts, tag_ends)
+    )
+    if real_word_count <= long_sentence_word_threshold:
+        return [(start, end)]
+    return _split_span_by_word_anchor_html_aware(
+        text,
+        start,
+        end,
+        anchor_every_words,
+        tag_starts,
+        tag_ends,
+    )
 
 
 # ---------------------------------------------------------------------------

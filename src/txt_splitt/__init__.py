@@ -42,6 +42,7 @@ from txt_splitt.splitters import (
     DenseRegexSentenceSplitter,
     HtmlAwareSentenceSplitter,
     RegexSentenceSplitter,
+    SparseRegexSentenceSplitter,
 )
 from txt_splitt.tracer import NoOpSpan, NoOpTracer, Span, Tracer, TracingLLMCallable
 from txt_splitt.types import (
@@ -89,6 +90,7 @@ __all__ = [
     "DenseRegexSentenceSplitter",
     "HtmlAwareSentenceSplitter",
     "RegexSentenceSplitter",
+    "SparseRegexSentenceSplitter",
     "ShortSentenceEnhancer",
     "LLMRepairingGapHandler",
     "RepairingGapHandler",
