@@ -1,5 +1,7 @@
 """Unit tests for the MarkedText chunking module."""
 
+import re
+
 import pytest
 
 from txt_splitt.chunkers import OverlapChunker, SizeBasedChunker
@@ -227,12 +229,32 @@ class TestOverlapChunker:
                 else:
                     break
             if overlap_text_parts:
-                overlap_len = sum(len(p) for p in overlap_text_parts) + len(
-                    overlap_text_parts
-                ) - 1
+                overlap_len = (
+                    sum(len(p) for p in overlap_text_parts)
+                    + len(overlap_text_parts)
+                    - 1
+                )
                 assert overlap_len >= overlap_target
 
     def test_default_params(self) -> None:
         chunker = OverlapChunker()
         short = MarkedText(tagged_text="{0} Hello", sentence_count=1)
         assert chunker.chunk(short) == [short]
+
+    def test_overlap_start_is_extended_to_marker_boundary(self) -> None:
+        """Overlap should not begin with a continuation line without {N} marker."""
+        lines = [
+            "{0} " + "A" * 20,
+            "tail0xxxxxx",
+            "{1} B",
+            "tail1yyyyyyyyyyyyyyyyyyyy",
+            "{2} " + "C" * 20,
+        ]
+        text = "\n".join(lines)
+        chunker = OverlapChunker(max_chars=70, overlap_chars=10)
+
+        result = chunker.chunk(MarkedText(tagged_text=text, sentence_count=3))
+
+        assert len(result) >= 2
+        first_line = result[1].tagged_text.split("\n", maxsplit=1)[0]
+        assert re.match(r"^\{\d+\}(?:\s|$)", first_line) is not None

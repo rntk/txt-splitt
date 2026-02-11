@@ -1,9 +1,12 @@
 """Chunking strategies for splitting MarkedText into smaller pieces."""
 
+import re
+
 from txt_splitt.types import MarkedText
 
 _DEFAULT_MAX_CHARS = 12_000
 _DEFAULT_OVERLAP_CHARS = 500
+_MARKER_LINE_RE = re.compile(r"^\{\d+\}(?:\s|$)")
 
 
 class SizeBasedChunker:
@@ -148,15 +151,33 @@ class OverlapChunker:
         return sum(len(ln) for ln in lines) + len(lines) - 1
 
     def _select_overlap(self, new_lines: list[str]) -> list[str]:
-        """Pick trailing lines from *new_lines* totalling ≥ overlap_chars."""
+        """Pick trailing lines from *new_lines* totalling ≥ overlap_chars.
+
+        If the overlap would start on a non-marker continuation line,
+        extend it backwards to include the corresponding marker line.
+        """
         if self._overlap_chars == 0:
             return []
         selected: list[str] = []
         acc = 0
+        first_idx = len(new_lines)
         for line in reversed(new_lines):
             acc += len(line) + (1 if selected else 0)
             selected.append(line)
+            first_idx -= 1
             if acc >= self._overlap_chars:
                 break
         selected.reverse()
+
+        # Ensure overlap begins at a valid sentence marker so LLM input
+        # never starts in the middle of a marked sentence.
+        while selected and not self._is_marker_line(selected[0]) and first_idx > 0:
+            first_idx -= 1
+            selected.insert(0, new_lines[first_idx])
+
         return selected
+
+    @staticmethod
+    def _is_marker_line(line: str) -> bool:
+        """Return True when *line* starts with a sentence number marker."""
+        return _MARKER_LINE_RE.match(line) is not None
