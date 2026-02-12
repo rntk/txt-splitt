@@ -25,6 +25,29 @@ class MarkedText:
 
 
 @dataclass(frozen=True, slots=True)
+class PreparedChunk:
+    """A chunk of marked text ready to send to an LLM."""
+
+    chunk_id: int
+    tagged_text: str
+    sentence_count: int
+    marker_start: int | None
+    marker_end: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedDocument:
+    """Prepared single-document state for two-stage pipeline processing."""
+
+    original_text: str
+    prepared_text: str
+    sentences: tuple[Sentence, ...]
+    marked_text: MarkedText
+    chunks: tuple[PreparedChunk, ...]
+    offset_mapping: OffsetMapping | None
+
+
+@dataclass(frozen=True, slots=True)
 class SentenceRange:
     """A range of sentence indices (both inclusive)."""
 

@@ -1,5 +1,6 @@
 """txt_splitt - A modular, pipeline-based text splitter."""
 
+from txt_splitt.batch_pipeline import BatchPipeline
 from txt_splitt.chunkers import OverlapChunker, SizeBasedChunker
 from txt_splitt.enhancers import ShortSentenceEnhancer
 from txt_splitt.errors import (
@@ -57,6 +58,8 @@ from txt_splitt.types import (
     MarkedText,
     OffsetMapping,
     OffsetSegment,
+    PreparedChunk,
+    PreparedDocument,
     Sentence,
     SentenceGroup,
     SentenceRange,
@@ -65,11 +68,14 @@ from txt_splitt.types import (
 
 __all__ = [
     # Pipeline
+    "BatchPipeline",
     "Pipeline",
     # Types
     "MarkedText",
     "OffsetMapping",
     "OffsetSegment",
+    "PreparedChunk",
+    "PreparedDocument",
     "Sentence",
     "SentenceGroup",
     "SentenceRange",
