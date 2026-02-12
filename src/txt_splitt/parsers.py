@@ -27,7 +27,8 @@ class TopicRangeParser:
 
         max_index = sentence_count - 1
         lines = [ln.strip() for ln in response.strip().splitlines() if ln.strip()]
-        groups: list[SentenceGroup] = []
+        grouped_ranges: dict[tuple[str, ...], list[SentenceRange]] = {}
+        label_order: list[tuple[str, ...]] = []
 
         for ln in lines:
             if ":" not in ln:
@@ -56,10 +57,16 @@ class TopicRangeParser:
                     start, end = end, start
                 clamped.append(SentenceRange(start=start, end=end))
 
-            clamped.sort(key=lambda r: (r.start, r.end))
-
             if clamped:
-                groups.append(SentenceGroup(label=label, ranges=tuple(clamped)))
+                if label not in grouped_ranges:
+                    grouped_ranges[label] = []
+                    label_order.append(label)
+                grouped_ranges[label].extend(clamped)
+
+        groups: list[SentenceGroup] = []
+        for label in label_order:
+            merged_ranges = _merge_ranges(grouped_ranges[label])
+            groups.append(SentenceGroup(label=label, ranges=tuple(merged_ranges)))
 
         if not groups:
             raise ParseError("No valid topic ranges found in response")
@@ -85,3 +92,24 @@ def _parse_range_string(ranges_str: str) -> list[tuple[int, int]]:
             results.append((n, n))
 
     return results
+
+
+def _merge_ranges(ranges: list[SentenceRange]) -> list[SentenceRange]:
+    """Sort and coalesce overlapping or adjacent ranges."""
+    if not ranges:
+        return []
+
+    ordered = sorted(ranges, key=lambda r: (r.start, r.end))
+    coalesced: list[SentenceRange] = [ordered[0]]
+
+    for current in ordered[1:]:
+        last = coalesced[-1]
+        if current.start <= last.end + 1:
+            coalesced[-1] = SentenceRange(
+                start=last.start,
+                end=max(last.end, current.end),
+            )
+            continue
+        coalesced.append(current)
+
+    return coalesced

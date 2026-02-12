@@ -125,3 +125,32 @@ class TestTopicRangeParser:
         response = "Technology>AI: nope\nScience>Climate: ???"
         with pytest.raises(ParseError):
             self.parser.parse(response, sentence_count=5)
+
+    def test_duplicate_topics_are_merged(self) -> None:
+        response = (
+            "Technology>AI>GPT-4: 0-2\n"
+            "Technology>AI>GPT-4: 4-5\n"
+            "Science>Climate>IPCC Report: 3"
+        )
+        result = self.parser.parse(response, sentence_count=6)
+
+        assert len(result) == 2
+        assert result[0].label == ("Technology", "AI", "GPT-4")
+        assert result[0].ranges == (
+            SentenceRange(start=0, end=2),
+            SentenceRange(start=4, end=5),
+        )
+        assert result[1].label == ("Science", "Climate", "IPCC Report")
+        assert result[1].ranges == (SentenceRange(start=3, end=3),)
+
+    def test_duplicate_topics_ranges_are_coalesced(self) -> None:
+        response = (
+            "Technology>Database>PostgreSQL: 0-2\n"
+            "Technology>Database>PostgreSQL: 2-4\n"
+            "Technology>Database>PostgreSQL: 5"
+        )
+        result = self.parser.parse(response, sentence_count=8)
+
+        assert len(result) == 1
+        assert result[0].label == ("Technology", "Database", "PostgreSQL")
+        assert result[0].ranges == (SentenceRange(start=0, end=5),)
