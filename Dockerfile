@@ -8,7 +8,7 @@ WORKDIR /app
 # Since we are mounting the volume, we can also install the package in editable mode
 # inside the container at runtime if needed, or just PYTHONPATH.
 
-RUN pip install --no-cache-dir ruff mypy pytest
+RUN pip install --no-cache-dir ruff mypy pytest prometheus_client
 
 # Keep the container running or ready for commands
 CMD ["bash"]

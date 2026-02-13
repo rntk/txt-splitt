@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, final
 
 from txt_splitt.joiners import join_sentences_by_groups
+from txt_splitt.metrics import NoOpMetrics, PipelineMetrics
 from txt_splitt.protocols import (
     Enhancer,
     GapHandler,
@@ -40,6 +41,8 @@ class Pipeline:
         html_cleaner: HtmlCleaner | None = None,
         offset_restorer: OffsetRestorer | None = None,
         tracer: Tracer | None = None,
+        name: str = "",
+        metrics: PipelineMetrics | None = None,
     ) -> None:
         if (html_cleaner is None) != (offset_restorer is None):
             msg = (
@@ -57,6 +60,10 @@ class Pipeline:
         self._html_cleaner = html_cleaner
         self._offset_restorer = offset_restorer
         self._tracer = tracer if tracer is not None else NoOpTracer()
+        self._name = name
+        self._metrics: PipelineMetrics | NoOpMetrics = (
+            metrics if metrics is not None else NoOpMetrics()
+        )
 
     def run(self, text: str) -> SplitResult:
         """Run the full pipeline on input text.
@@ -67,32 +74,50 @@ class Pipeline:
             # Stage 0 (optional): Clean HTML tags
             mapping = None
             if self._html_cleaner is not None:
-                with self._tracer.span("html_clean") as s:
+                with (
+                    self._tracer.span("html_clean") as s,
+                    self._metrics.stage(self._name, "html_clean"),
+                ):
                     text, mapping = self._html_cleaner.clean(text)
                     s.attributes["clean_length"] = len(text)
 
             # Stage 1: Split into sentences
-            with self._tracer.span("split") as s:
+            with (
+                self._tracer.span("split") as s,
+                self._metrics.stage(self._name, "split"),
+            ):
                 sentences = self._splitter.split(text)
                 s.attributes["sentence_count"] = len(sentences)
 
             # Stage 2: Apply markers
-            with self._tracer.span("mark") as s:
+            with (
+                self._tracer.span("mark") as s,
+                self._metrics.stage(self._name, "mark"),
+            ):
                 marked = self._marker.mark(text, sentences)
                 s.attributes["tagged_text_length"] = len(marked.tagged_text)
 
             # Stage 3: Query LLM
-            with self._tracer.span("llm.query") as s:
+            with (
+                self._tracer.span("llm.query") as s,
+                self._metrics.stage(self._name, "llm_query"),
+            ):
                 response = self._llm.query(marked)
                 s.attributes["response_length"] = len(response)
 
             # Stage 4: Parse response
-            with self._tracer.span("parse") as s:
+            with (
+                self._tracer.span("parse") as s,
+                self._metrics.stage(self._name, "parse"),
+            ):
                 groups = self._parser.parse(response, marked.sentence_count)
                 s.attributes["group_count"] = len(groups)
 
             # Stage 5: Handle gaps
-            with self._tracer.span("gap_handler") as s:
+            with (
+                self._tracer.span("gap_handler") as s,
+                self._metrics.stage(self._name, "gap_handler"),
+            ):
                 groups = self._gap_handler.handle(
                     groups, marked.sentence_count, sentences=sentences
                 )
@@ -100,13 +125,19 @@ class Pipeline:
 
             # Stage 6 (optional): Enhance boundaries
             if self._enhancer is not None:
-                with self._tracer.span("enhance") as s:
+                with (
+                    self._tracer.span("enhance") as s,
+                    self._metrics.stage(self._name, "enhance"),
+                ):
                     groups = self._enhancer.enhance(groups, sentences)
                     s.attributes["group_count"] = len(groups)
 
             # Stage 7 (optional): Join adjacent groups
             if self._joiner is not None:
-                with self._tracer.span("join") as s:
+                with (
+                    self._tracer.span("join") as s,
+                    self._metrics.stage(self._name, "join"),
+                ):
                     groups = self._joiner.join(groups, sentences)
                     sentences, groups = join_sentences_by_groups(groups, sentences)
                     s.attributes["sentence_count"] = len(sentences)
@@ -116,7 +147,10 @@ class Pipeline:
 
             # Stage 8 (optional): Restore original-text offsets
             if self._offset_restorer is not None and mapping is not None:
-                with self._tracer.span("offset_restore") as s:
+                with (
+                    self._tracer.span("offset_restore") as s,
+                    self._metrics.stage(self._name, "offset_restore"),
+                ):
                     result = self._offset_restorer.restore(result, mapping)
                     s.attributes["sentence_count"] = len(result.sentences)
 
