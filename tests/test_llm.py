@@ -1,5 +1,6 @@
 """Unit tests for the LLM stage."""
 
+from typing import Literal, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -94,6 +95,53 @@ class TestTopicRangeLLM:
         assert isinstance(args[0], str)
         assert kwargs["temperature"] == 0.7
 
+    def test_json_output_mode_updates_prompt_with_schema(self) -> None:
+        client = MagicMock()
+        client.call.return_value = '{"topics":[]}'
+        llm = TopicRangeLLM(client, output_mode="json")
+
+        marked_text = MarkedText(tagged_text="{0} Text", sentence_count=1)
+        llm.query(marked_text)
+
+        args, _kwargs = client.call.call_args
+        prompt = args[0]
+        assert "JSON SCHEMA:" in prompt
+        assert '"topics"' in prompt
+        assert '"label"' in prompt
+        assert '"ranges"' in prompt
+        assert "Return ONLY valid JSON" in prompt
+        assert llm.response_format == "json"
+
+    def test_invalid_output_mode_raises(self) -> None:
+        client = MagicMock()
+        invalid_mode = cast(Literal["text", "json"], "yaml")
+        with pytest.raises(ValueError, match="output_mode must be"):
+            TopicRangeLLM(client, output_mode=invalid_mode)
+
+    def test_invalid_max_response_chars_raises(self) -> None:
+        client = MagicMock()
+        with pytest.raises(ValueError, match="max_response_chars must be > 0"):
+            TopicRangeLLM(client, max_response_chars=0)
+
+    def test_overly_large_response_raises_error(self) -> None:
+        client = MagicMock()
+        client.call.return_value = "x" * 101
+        llm = TopicRangeLLM(client, max_response_chars=100)
+
+        marked_text = MarkedText(tagged_text="{0} Text", sentence_count=1)
+        with pytest.raises(LLMError, match="LLM response too large"):
+            llm.query(marked_text)
+
+    def test_repetitive_response_raises_error(self) -> None:
+        client = MagicMock()
+        repeated_phrase = "article 5 is 520-521 and article 6 is 521-521 duplicate"
+        client.call.return_value = " ".join([repeated_phrase] * 40)
+        llm = TopicRangeLLM(client)
+
+        marked_text = MarkedText(tagged_text="{0} Text", sentence_count=1)
+        with pytest.raises(LLMError, match="LLM response appears repetitive"):
+            llm.query(marked_text)
+
 
 class TestTopicRangeLLMWithChunker:
     def test_query_without_chunker_unchanged(self) -> None:
@@ -173,3 +221,27 @@ class TestTopicRangeLLMWithChunker:
         llm = TopicRangeLLM(client, chunker=chunker)
         with pytest.raises(LLMError, match="Empty LLM response"):
             llm.query(mt)
+
+    def test_chunker_concatenates_json_responses(self) -> None:
+        client = MagicMock()
+        client.call.side_effect = [
+            '{"topics":[{"label":["Technology","AI"],"ranges":[{"start":0,"end":2}]}]}',
+            '{"topics":[{"label":["Science","Climate"],"ranges":[{"start":3,"end":5}]}]}',
+        ]
+
+        chunker = MagicMock()
+        chunk_a = MarkedText(tagged_text="{0} A\n{1} B\n{2} C", sentence_count=3)
+        chunk_b = MarkedText(tagged_text="{3} D\n{4} E\n{5} F", sentence_count=3)
+        chunker.chunk.return_value = [chunk_a, chunk_b]
+
+        llm = TopicRangeLLM(client, chunker=chunker, output_mode="json")
+        mt = MarkedText(
+            tagged_text="{0} A\n{1} B\n{2} C\n{3} D\n{4} E\n{5} F",
+            sentence_count=6,
+        )
+        result = llm.query(mt)
+
+        assert result == (
+            '{"topics":[{"label":["Technology","AI"],"ranges":[{"start":0,"end":2}]}]}\n'
+            '{"topics":[{"label":["Science","Climate"],"ranges":[{"start":3,"end":5}]}]}'
+        )

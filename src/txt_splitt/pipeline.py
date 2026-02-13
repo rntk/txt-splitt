@@ -46,6 +46,7 @@ class Pipeline:
                 "html_cleaner and offset_restorer must both be provided or both be None"
             )
             raise ValueError(msg)
+        _validate_stage_compatibility(llm, parser)
         self._splitter = splitter
         self._marker = marker
         self._llm = llm
@@ -120,3 +121,23 @@ class Pipeline:
                     s.attributes["sentence_count"] = len(result.sentences)
 
             return result
+
+
+def _validate_stage_compatibility(llm: LLMStrategy, parser: ResponseParser) -> None:
+    llm_format_obj = getattr(llm, "response_format", "text")
+    parser_formats_obj = getattr(
+        parser, "supported_response_formats", frozenset({"text"})
+    )
+
+    llm_format = llm_format_obj if isinstance(llm_format_obj, str) else "text"
+    if isinstance(parser_formats_obj, (set, frozenset)):
+        parser_formats = {item for item in parser_formats_obj if isinstance(item, str)}
+    else:
+        parser_formats = {"text"}
+
+    if llm_format not in parser_formats:
+        msg = (
+            "Incompatible llm/parser response formats: "
+            f"llm outputs {llm_format!r}, parser supports {sorted(parser_formats)!r}"
+        )
+        raise ValueError(msg)

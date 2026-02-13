@@ -45,12 +45,24 @@ class StubLLM:
         return self._response
 
 
+class JsonStubLLM(StubLLM):
+    response_format = "json"
+
+
 class StubParser:
     def __init__(self, groups: list[SentenceGroup]) -> None:
         self._groups = groups
 
     def parse(self, response: str, sentence_count: int) -> list[SentenceGroup]:
         return self._groups
+
+
+class JsonStubParser(StubParser):
+    supported_response_formats = frozenset({"json"})
+
+
+class AutoStubParser(StubParser):
+    supported_response_formats = frozenset({"text", "json"})
 
 
 class StubGapHandler:
@@ -236,6 +248,36 @@ class TestPipeline:
 
         assert isinstance(result.sentences, tuple)
         assert isinstance(result.groups, tuple)
+
+    def test_constructor_rejects_incompatible_llm_and_parser_formats(self) -> None:
+        with pytest.raises(
+            ValueError, match="Incompatible llm/parser response formats"
+        ):
+            Pipeline(
+                splitter=StubSplitter(_make_sentences(1)),
+                marker=StubMarker(MarkedText(tagged_text="...", sentence_count=1)),
+                llm=JsonStubLLM('{"topics":[]}'),
+                parser=StubParser(_make_groups()),
+                gap_handler=StubGapHandler(_make_groups()),
+            )
+
+    def test_constructor_accepts_json_llm_with_json_parser(self) -> None:
+        Pipeline(
+            splitter=StubSplitter(_make_sentences(1)),
+            marker=StubMarker(MarkedText(tagged_text="...", sentence_count=1)),
+            llm=JsonStubLLM('{"topics":[]}'),
+            parser=JsonStubParser(_make_groups()),
+            gap_handler=StubGapHandler(_make_groups()),
+        )
+
+    def test_constructor_accepts_json_llm_with_auto_parser(self) -> None:
+        Pipeline(
+            splitter=StubSplitter(_make_sentences(1)),
+            marker=StubMarker(MarkedText(tagged_text="...", sentence_count=1)),
+            llm=JsonStubLLM('{"topics":[]}'),
+            parser=AutoStubParser(_make_groups()),
+            gap_handler=StubGapHandler(_make_groups()),
+        )
 
     def test_splitter_error_propagates(self) -> None:
         pipeline = Pipeline(

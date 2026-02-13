@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import json
+import re
+from collections import Counter
+from typing import TYPE_CHECKING, Literal
 
 from txt_splitt.errors import LLMError
 from txt_splitt.protocols import LLMCallable
@@ -21,10 +24,24 @@ class TopicRangeLLM:
         *,
         temperature: float = 0.0,
         chunker: MarkedTextChunker | None = None,
+        output_mode: Literal["text", "json"] = "text",
+        max_response_chars: int = 50_000,
     ) -> None:
+        if output_mode not in {"text", "json"}:
+            msg = f"output_mode must be 'text' or 'json', got {output_mode!r}"
+            raise ValueError(msg)
+        if max_response_chars <= 0:
+            msg = f"max_response_chars must be > 0, got {max_response_chars}"
+            raise ValueError(msg)
         self._client = client
         self._temperature = temperature
         self._chunker = chunker
+        self._output_mode = output_mode
+        self._max_response_chars = max_response_chars
+
+    @property
+    def response_format(self) -> Literal["text", "json"]:
+        return self._output_mode
 
     def query(self, marked_text: MarkedText) -> str:
         chunks = (
@@ -40,7 +57,10 @@ class TopicRangeLLM:
         return "\n".join(responses)
 
     def _query_single(self, marked_text: MarkedText) -> str:
-        prompt = _build_topic_ranges_prompt(marked_text.tagged_text)
+        if self._output_mode == "json":
+            prompt = _build_topic_ranges_json_prompt(marked_text.tagged_text)
+        else:
+            prompt = _build_topic_ranges_prompt(marked_text.tagged_text)
 
         try:
             response = self._client.call(prompt, temperature=self._temperature)
@@ -52,7 +72,45 @@ class TopicRangeLLM:
         if not response or not response.strip():
             raise LLMError("Empty LLM response")
 
-        return response.strip()
+        cleaned = response.strip()
+        if len(cleaned) > self._max_response_chars:
+            raise LLMError(
+                "LLM response too large: "
+                f"{len(cleaned)} characters exceeds limit {self._max_response_chars}"
+            )
+        if _looks_repetitive(cleaned):
+            raise LLMError("LLM response appears repetitive or stuck in a loop")
+
+        return cleaned
+
+
+_WORD_PATTERN = re.compile(r"[A-Za-z0-9#.+-]+")
+
+
+def _looks_repetitive(response: str) -> bool:
+    words = _WORD_PATTERN.findall(response.lower())
+    if len(words) < 120:
+        return False
+
+    unique_ratio = len(set(words)) / len(words)
+    if unique_ratio < 0.18:
+        return True
+
+    shingle_size = 8
+    if len(words) <= shingle_size:
+        return False
+
+    shingles = [
+        " ".join(words[i : i + shingle_size])
+        for i in range(len(words) - shingle_size + 1)
+    ]
+    counts = Counter(shingles)
+    most_common = counts.most_common(1)
+    if not most_common:
+        return False
+
+    _, freq = most_common[0]
+    return freq >= 12
 
 
 def _build_topic_ranges_prompt(tagged_text: str) -> str:
@@ -175,3 +233,55 @@ SENTENCE RULES:
 {tagged_text}
 </content>
 """
+
+
+def _build_topic_ranges_json_prompt(tagged_text: str) -> str:
+    schema = json.dumps(_topic_ranges_json_schema(), indent=2)
+    return f"""{_build_topic_ranges_prompt(tagged_text)}
+
+IMPORTANT OUTPUT OVERRIDE:
+- Ignore the plain-text output format above.
+- Return ONLY valid JSON that matches this schema.
+- Do not wrap in markdown fences.
+- Do not add any prose or explanation.
+
+JSON SCHEMA:
+{schema}
+"""
+
+
+def _topic_ranges_json_schema() -> dict[str, object]:
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["topics"],
+        "properties": {
+            "topics": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["label", "ranges"],
+                    "properties": {
+                        "label": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {"type": "string"},
+                        },
+                        "ranges": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "required": ["start", "end"],
+                                "properties": {
+                                    "start": {"type": "integer", "minimum": 0},
+                                    "end": {"type": "integer", "minimum": 0},
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    }
