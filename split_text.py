@@ -20,6 +20,7 @@ from txt_splitt import (
     MappingOffsetRestorer,
     OverlapChunker,
     Pipeline,
+    RetryingLLMCallable,
     SparseRegexSentenceSplitter,
     TagStripCleaner,
     TopicRangeLLM,
@@ -340,6 +341,9 @@ def main() -> None:
     # Create LLM client and adapter
     llm_client = LLamaCPP(host=args.host, model=args.model)
     llm_adapter = LLamaCPPAdapter(llm_client)
+
+    # Wrap with retry logic
+    llm_adapter = RetryingLLMCallable(llm_adapter, max_retries=3, backoff_factor=1.0)
 
     # Set up tracing if requested
     tracer: Tracer | None = Tracer() if args.trace else None

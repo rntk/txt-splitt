@@ -25,6 +25,7 @@ from txt_splitt.normalizers import NormalizingSplitter
 from txt_splitt.offset_restorers import MappingOffsetRestorer
 from txt_splitt.parsers import TopicRangeParser
 from txt_splitt.pipeline import Pipeline
+from txt_splitt.retry import RetryingLLMCallable
 from txt_splitt.protocols import (
     Enhancer,
     GapHandler,
@@ -97,6 +98,8 @@ __all__ = [
     "StrictGapHandler",
     "TopicRangeLLM",
     "TopicRangeParser",
+    # Retry
+    "RetryingLLMCallable",
     # Tracing
     "NoOpSpan",
     "NoOpTracer",
