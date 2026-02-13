@@ -141,7 +141,7 @@ class TestPipelineMetrics:
         failures = _get_counter_value(
             registry,
             "pipeline_stage_failures",
-            {"pipeline": "my_pipe", "stage": "split", "error": "RuntimeError"},
+            {"pipeline": "my_pipe", "stage": "split"},
         )
         assert failures == 0.0
 
@@ -165,7 +165,7 @@ class TestPipelineMetrics:
         failures = _get_counter_value(
             registry,
             "pipeline_stage_failures",
-            {"pipeline": "pipe1", "stage": "llm_query", "error": "ValueError"},
+            {"pipeline": "pipe1", "stage": "llm_query"},
         )
         assert failures == 1.0
 
@@ -249,7 +249,7 @@ class TestPipelineMetricsIntegration:
         failures = _get_counter_value(
             registry,
             "pipeline_stage_failures",
-            {"pipeline": "fail_pipe", "stage": "split", "error": "RuntimeError"},
+            {"pipeline": "fail_pipe", "stage": "split"},
         )
         assert failures == 1.0
 

@@ -14,7 +14,7 @@ class PipelineMetrics:
     """Records Prometheus metrics for each pipeline stage.
 
     Uses a Histogram for duration (which also provides call counts via
-    ``_count``) and a Counter for failures broken down by error type.
+    ``_count``) and a Counter for failures.
     """
 
     def __init__(self, registry: CollectorRegistry | None = None) -> None:
@@ -29,7 +29,7 @@ class PipelineMetrics:
         self._failures = Counter(
             "pipeline_stage_failures_total",
             "Total number of pipeline stage failures",
-            labelnames=["pipeline", "stage", "error"],
+            labelnames=["pipeline", "stage"],
             registry=reg,
         )
 
@@ -37,20 +37,17 @@ class PipelineMetrics:
     def stage(self, pipeline: str, stage_name: str) -> Generator[None, None, None]:
         """Context manager that times a stage and records failures."""
         start = time.monotonic()
+        failed = False
         try:
             yield
-        except Exception as exc:
-            elapsed = time.monotonic() - start
-            self._duration.labels(pipeline=pipeline, stage=stage_name).observe(elapsed)
-            self._failures.labels(
-                pipeline=pipeline,
-                stage=stage_name,
-                error=type(exc).__name__,
-            ).inc()
+        except Exception:
+            failed = True
             raise
-        else:
+        finally:
             elapsed = time.monotonic() - start
             self._duration.labels(pipeline=pipeline, stage=stage_name).observe(elapsed)
+            if failed:
+                self._failures.labels(pipeline=pipeline, stage=stage_name).inc()
 
 
 class NoOpMetrics:
