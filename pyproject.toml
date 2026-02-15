@@ -22,6 +22,9 @@ dev = [
     "mypy",
     "pytest",
 ]
+llms = [
+    "openai>=2.0.0",
+]
 
 [build-system]
 requires = ["hatchling"]

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Simple script to split text using LLamaCPP client and txt_splitt pipeline."""
+"""Simple script to split text using OpenAI and txt_splitt pipeline."""
 
 import argparse
 import asyncio
@@ -33,6 +33,7 @@ from txt_splitt import (
     TracingLLMCallable,
 )
 from txt_splitt.llms.llamacpp import AsyncLLamaCPP, LLamaCPP
+from txt_splitt.llms.openai import AsyncOpenAIClient, OpenAIClient
 
 
 class LLamaCPPAdapter:
@@ -55,6 +56,28 @@ class AsyncLLamaCPPAdapter:
     async def call(self, prompt: str, temperature: float) -> str:
         """Call the LLM with a prompt and temperature."""
         return await self._client.call([prompt], temperature=temperature)  # type: ignore[no-any-return]
+
+
+class OpenAIClientAdapter:
+    """Adapter to make OpenAIClient compatible with LLMCallable protocol."""
+
+    def __init__(self, client: OpenAIClient) -> None:
+        self._client = client
+
+    def call(self, prompt: str, temperature: float) -> str:
+        """Call the LLM with a prompt and temperature."""
+        return self._client.call(prompt, temperature=temperature)
+
+
+class AsyncOpenAIClientAdapter:
+    """Adapter to make AsyncOpenAIClient compatible with AsyncLLMCallable protocol."""
+
+    def __init__(self, client: AsyncOpenAIClient) -> None:
+        self._client = client
+
+    async def call(self, prompt: str, temperature: float) -> str:
+        """Call the LLM with a prompt and temperature."""
+        return await self._client.call(prompt, temperature=temperature)
 
 
 def result_to_dict(result: Any) -> dict[str, Any]:
@@ -376,16 +399,28 @@ def generate_html_report(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Split text using LLamaCPP and txt_splitt pipeline"
+        description="Split text using OpenAI and txt_splitt pipeline"
     )
     parser.add_argument("input_file", help="Input text file to split")
     parser.add_argument(
-        "--host",
-        required=True,
-        help="LLamaCPP server host (e.g., http://localhost:8080)",
+        "--model",
+        default="gpt-4o-mini",
+        help="OpenAI model name (default: gpt-4o-mini)",
     )
     parser.add_argument(
-        "--model", default="default", help="Model name (default: default)"
+        "--api-key",
+        default=None,
+        help="OpenAI API key (optional; defaults to OPENAI_API_KEY env var)",
+    )
+    parser.add_argument(
+        "--base-url",
+        default=None,
+        help="OpenAI-compatible base URL (optional, e.g. for proxy/gateway)",
+    )
+    parser.add_argument(
+        "--organization",
+        default=None,
+        help="OpenAI organization ID (optional)",
     )
     parser.add_argument(
         "--temperature", type=float, default=0.0, help="Temperature (default: 0.0)"
@@ -501,16 +536,22 @@ def run_sync(args: Any) -> None:
 
     text = input_path.read_text(encoding="utf-8")
 
-    llm_client = LLamaCPP(host=args.host, model=args.model)
-    llm_adapter = LLamaCPPAdapter(llm_client)
-    llm_with_retry: LLMCallable = RetryingLLMCallable(
-        llm_adapter, max_retries=3, backoff_factor=1.0
+    # Create OpenAI-backed LLM client
+    llm_adapter: LLMCallable = OpenAIClient(
+        model=args.model,
+        api_key=args.api_key,
+        base_url=args.base_url,
+        organization=args.organization,
     )
 
+    # Wrap with retry logic
+    llm_adapter = RetryingLLMCallable(llm_adapter, max_retries=3, backoff_factor=1.0)
+
+    # Set up tracing if requested
     tracer: Tracer | None = Tracer() if args.trace else None
-    llm_callable: LLMCallable = llm_with_retry
+    llm_callable: LLMCallable = llm_adapter
     if tracer is not None:
-        llm_callable = TracingLLMCallable(llm_with_retry, tracer)
+        llm_callable = TracingLLMCallable(llm_adapter, tracer)
 
     pipeline = create_pipeline(args, input_path, llm_callable, tracer=tracer)
 
@@ -545,10 +586,19 @@ async def run_async(args: Any) -> None:
 
     text = input_path.read_text(encoding="utf-8")
 
-    sync_llm_client = LLamaCPP(host=args.host, model=args.model)
-    sync_llm_adapter = LLamaCPPAdapter(sync_llm_client)
-    async_llm_client = AsyncLLamaCPP(host=args.host, model=args.model)
-    async_llm_adapter = AsyncLLamaCPPAdapter(async_llm_client)
+    # Create OpenAI-backed LLM clients
+    sync_llm_adapter: LLMCallable = OpenAIClient(
+        model=args.model,
+        api_key=args.api_key,
+        base_url=args.base_url,
+        organization=args.organization,
+    )
+    async_llm_adapter = AsyncOpenAIClient(
+        model=args.model,
+        api_key=args.api_key,
+        base_url=args.base_url,
+        organization=args.organization,
+    )
 
     tracer: Tracer | None = Tracer() if args.trace else None
     sync_llm_callable: LLMCallable = RetryingLLMCallable(
