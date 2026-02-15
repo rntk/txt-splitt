@@ -404,8 +404,8 @@ def main() -> None:
     parser.add_argument("input_file", help="Input text file to split")
     parser.add_argument(
         "--model",
-        default="gpt-4o-mini",
-        help="OpenAI model name (default: gpt-4o-mini)",
+        default="gpt-5-nano",
+        help="OpenAI model name (default: gpt-5-nano)",
     )
     parser.add_argument(
         "--api-key",
@@ -421,6 +421,12 @@ def main() -> None:
         "--organization",
         default=None,
         help="OpenAI organization ID (optional)",
+    )
+    parser.add_argument(
+        "--reasoning-effort",
+        choices=["none", "minimal", "low", "medium", "high", "xhigh"],
+        default=None,
+        help="Reasoning effort for supported models (optional)",
     )
     parser.add_argument(
         "--temperature", type=float, default=0.0, help="Temperature (default: 0.0)"
@@ -542,6 +548,7 @@ def run_sync(args: Any) -> None:
         api_key=args.api_key,
         base_url=args.base_url,
         organization=args.organization,
+        reasoning_effort=args.reasoning_effort,
     )
 
     # Wrap with retry logic
