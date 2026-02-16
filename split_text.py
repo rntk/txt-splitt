@@ -23,7 +23,8 @@ from txt_splitt import (
     RetryingLLMCallable,
     SparseRegexSentenceSplitter,
     TagStripCleaner,
-    TopicRangeLLM,
+    TopicListLLM,
+    TopicRangeAssignmentLLM,
     TopicRangeParser,
     Tracer,
     TracingLLMCallable,
@@ -363,14 +364,19 @@ def main() -> None:
     pipeline = Pipeline(
         splitter=splitter,
         marker=BracketMarker(),
-        llm=TopicRangeLLM(
+        topic_extractor=TopicListLLM(
             client=llm_callable,
-            temperature=0.0,
+            temperature=args.temperature,
+            chunker=OverlapChunker(max_chars=max_chunk_chars),
+        ),
+        range_assigner=TopicRangeAssignmentLLM(
+            client=llm_callable,
+            temperature=args.temperature,
             chunker=OverlapChunker(max_chars=max_chunk_chars),
         ),
         parser=TopicRangeParser(),
         gap_handler=LLMRepairingGapHandler(
-            llm_callable, temperature=0.0, tracer=tracer
+            llm_callable, temperature=args.temperature, tracer=tracer
         ),
         joiner=AdjacentSameTopicJoiner(),
         html_cleaner=html_cleaner,
