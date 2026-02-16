@@ -592,6 +592,211 @@ class RecordingSplitter:
         return self._sentences
 
 
+class StubTopicExtractor:
+    def __init__(self, topics: list[str]) -> None:
+        self._topics = topics
+
+    def extract(self, marked_text: MarkedText) -> list[str]:
+        return self._topics
+
+
+class StubRangeAssigner:
+    def __init__(self, response: str) -> None:
+        self._response = response
+
+    def assign(self, marked_text: MarkedText, topics: list[str]) -> str:
+        return self._response
+
+
+class JsonStubRangeAssigner(StubRangeAssigner):
+    response_format = "json"
+
+
+class FailingTopicExtractor:
+    def extract(self, marked_text: MarkedText) -> list[str]:
+        raise LLMError("Extraction failed")
+
+
+class FailingRangeAssigner:
+    def assign(self, marked_text: MarkedText, topics: list[str]) -> str:
+        raise LLMError("Assignment failed")
+
+
+class RecordingRangeAssigner:
+    def __init__(self, response: str) -> None:
+        self._response = response
+        self.seen_topics: list[str] | None = None
+
+    def assign(self, marked_text: MarkedText, topics: list[str]) -> str:
+        self.seen_topics = topics
+        return self._response
+
+
+class TestTwoStagePipeline:
+    def test_successful_run(self) -> None:
+        sentences = _make_sentences(3)
+        groups = _make_groups()
+
+        pipeline = Pipeline(
+            splitter=StubSplitter(sentences),
+            marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
+            topic_extractor=StubTopicExtractor(["Technology>AI", "Science>Climate"]),
+            range_assigner=StubRangeAssigner("Technology>AI: 0-2"),
+            parser=StubParser(groups),
+            gap_handler=StubGapHandler(groups),
+        )
+        result = pipeline.run("Some text")
+
+        assert isinstance(result, SplitResult)
+        assert len(result.sentences) == 3
+        assert len(result.groups) == 1
+        assert result.groups[0].label == ("Technology", "AI")
+
+    def test_extractor_output_passed_to_assigner(self) -> None:
+        sentences = _make_sentences(3)
+        groups = _make_groups()
+        topics = ["Technology>AI>GPT-4", "Sport>Football>England"]
+        assigner = RecordingRangeAssigner("Technology>AI>GPT-4: 0-2")
+
+        pipeline = Pipeline(
+            splitter=StubSplitter(sentences),
+            marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
+            topic_extractor=StubTopicExtractor(topics),
+            range_assigner=assigner,
+            parser=StubParser(groups),
+            gap_handler=StubGapHandler(groups),
+        )
+        pipeline.run("text")
+
+        assert assigner.seen_topics == topics
+
+    def test_rejects_llm_with_topic_extractor(self) -> None:
+        with pytest.raises(ValueError, match="Cannot provide both"):
+            Pipeline(
+                splitter=StubSplitter(_make_sentences(1)),
+                marker=StubMarker(MarkedText(tagged_text=".", sentence_count=1)),
+                llm=StubLLM("x"),
+                topic_extractor=StubTopicExtractor(["Technology>AI"]),
+                range_assigner=StubRangeAssigner("Technology>AI: 0"),
+                parser=StubParser(_make_groups()),
+                gap_handler=StubGapHandler(_make_groups()),
+            )
+
+    def test_rejects_llm_with_range_assigner(self) -> None:
+        with pytest.raises(ValueError, match="Cannot provide both"):
+            Pipeline(
+                splitter=StubSplitter(_make_sentences(1)),
+                marker=StubMarker(MarkedText(tagged_text=".", sentence_count=1)),
+                llm=StubLLM("x"),
+                range_assigner=StubRangeAssigner("Technology>AI: 0"),
+                parser=StubParser(_make_groups()),
+                gap_handler=StubGapHandler(_make_groups()),
+            )
+
+    def test_rejects_no_llm_path(self) -> None:
+        with pytest.raises(ValueError, match="Must provide either"):
+            Pipeline(
+                splitter=StubSplitter(_make_sentences(1)),
+                marker=StubMarker(MarkedText(tagged_text=".", sentence_count=1)),
+                parser=StubParser(_make_groups()),
+                gap_handler=StubGapHandler(_make_groups()),
+            )
+
+    def test_rejects_extractor_without_assigner(self) -> None:
+        with pytest.raises(ValueError, match="Both .* must be provided"):
+            Pipeline(
+                splitter=StubSplitter(_make_sentences(1)),
+                marker=StubMarker(MarkedText(tagged_text=".", sentence_count=1)),
+                topic_extractor=StubTopicExtractor(["Technology>AI"]),
+                parser=StubParser(_make_groups()),
+                gap_handler=StubGapHandler(_make_groups()),
+            )
+
+    def test_rejects_assigner_without_extractor(self) -> None:
+        with pytest.raises(ValueError, match="Both .* must be provided"):
+            Pipeline(
+                splitter=StubSplitter(_make_sentences(1)),
+                marker=StubMarker(MarkedText(tagged_text=".", sentence_count=1)),
+                range_assigner=StubRangeAssigner("Technology>AI: 0"),
+                parser=StubParser(_make_groups()),
+                gap_handler=StubGapHandler(_make_groups()),
+            )
+
+    def test_extractor_error_propagates(self) -> None:
+        sentences = _make_sentences(3)
+
+        pipeline = Pipeline(
+            splitter=StubSplitter(sentences),
+            marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
+            topic_extractor=FailingTopicExtractor(),
+            range_assigner=StubRangeAssigner("x"),
+            parser=StubParser([]),
+            gap_handler=StubGapHandler([]),
+        )
+        with pytest.raises(LLMError, match="Extraction failed"):
+            pipeline.run("text")
+
+    def test_assigner_error_propagates(self) -> None:
+        sentences = _make_sentences(3)
+
+        pipeline = Pipeline(
+            splitter=StubSplitter(sentences),
+            marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
+            topic_extractor=StubTopicExtractor(["Technology>AI"]),
+            range_assigner=FailingRangeAssigner(),
+            parser=StubParser([]),
+            gap_handler=StubGapHandler([]),
+        )
+        with pytest.raises(LLMError, match="Assignment failed"):
+            pipeline.run("text")
+
+    def test_json_assigner_with_json_parser(self) -> None:
+        Pipeline(
+            splitter=StubSplitter(_make_sentences(1)),
+            marker=StubMarker(MarkedText(tagged_text=".", sentence_count=1)),
+            topic_extractor=StubTopicExtractor(["Technology>AI"]),
+            range_assigner=JsonStubRangeAssigner('{"topics":[]}'),
+            parser=JsonStubParser(_make_groups()),
+            gap_handler=StubGapHandler(_make_groups()),
+        )
+
+    def test_json_assigner_incompatible_with_text_parser(self) -> None:
+        with pytest.raises(
+            ValueError, match="Incompatible llm/parser response formats"
+        ):
+            Pipeline(
+                splitter=StubSplitter(_make_sentences(1)),
+                marker=StubMarker(MarkedText(tagged_text=".", sentence_count=1)),
+                topic_extractor=StubTopicExtractor(["Technology>AI"]),
+                range_assigner=JsonStubRangeAssigner('{"topics":[]}'),
+                parser=StubParser(_make_groups()),
+                gap_handler=StubGapHandler(_make_groups()),
+            )
+
+    def test_end_to_end_with_real_stages(self) -> None:
+        from txt_splitt.gap_handlers import StrictGapHandler
+        from txt_splitt.markers import BracketMarker
+        from txt_splitt.parsers import TopicRangeParser
+        from txt_splitt.splitters import RegexSentenceSplitter
+
+        text = "AI is growing fast. Climate change is real."
+
+        pipeline = Pipeline(
+            splitter=RegexSentenceSplitter(),
+            marker=BracketMarker(),
+            topic_extractor=StubTopicExtractor(["Technology>AI", "Science>Climate"]),
+            range_assigner=StubRangeAssigner("Technology>AI: 0\nScience>Climate: 1"),
+            parser=TopicRangeParser(),
+            gap_handler=StrictGapHandler(),
+        )
+        result = pipeline.run(text)
+
+        assert len(result.sentences) == 2
+        assert len(result.groups) == 2
+        assert result.groups[0].label == ("Technology", "AI")
+        assert result.groups[1].label == ("Science", "Climate")
+
+
 class TestPipelineHtmlCleaning:
     def _make_mapping(self) -> OffsetMapping:
         return OffsetMapping(

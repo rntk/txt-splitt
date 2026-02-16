@@ -13,8 +13,10 @@ from txt_splitt.protocols import (
     LLMStrategy,
     MarkerStrategy,
     OffsetRestorer,
+    RangeAssigner,
     ResponseParser,
     SentenceSplitter,
+    TopicExtractor,
 )
 from txt_splitt.tracer import NoOpTracer
 from txt_splitt.types import SplitResult
@@ -32,7 +34,9 @@ class Pipeline:
         *,
         splitter: SentenceSplitter,
         marker: MarkerStrategy,
-        llm: LLMStrategy,
+        llm: LLMStrategy | None = None,
+        topic_extractor: TopicExtractor | None = None,
+        range_assigner: RangeAssigner | None = None,
         parser: ResponseParser,
         gap_handler: GapHandler,
         enhancer: Enhancer | None = None,
@@ -46,10 +50,35 @@ class Pipeline:
                 "html_cleaner and offset_restorer must both be provided or both be None"
             )
             raise ValueError(msg)
-        _validate_stage_compatibility(llm, parser)
+        has_single = llm is not None
+        has_two_stage = topic_extractor is not None or range_assigner is not None
+        if has_single and has_two_stage:
+            msg = (
+                "Cannot provide both 'llm' and 'topic_extractor'/'range_assigner'; "
+                "choose one path"
+            )
+            raise ValueError(msg)
+        if not has_single and not has_two_stage:
+            msg = (
+                "Must provide either 'llm' or both "
+                "'topic_extractor' and 'range_assigner'"
+            )
+            raise ValueError(msg)
+        if has_two_stage and (topic_extractor is None or range_assigner is None):
+            msg = (
+                "Both 'topic_extractor' and 'range_assigner' must be provided "
+                "for two-stage mode"
+            )
+            raise ValueError(msg)
+        if llm is not None:
+            _validate_stage_compatibility(llm, parser)
+        if range_assigner is not None:
+            _validate_stage_compatibility(range_assigner, parser)
         self._splitter = splitter
         self._marker = marker
         self._llm = llm
+        self._topic_extractor = topic_extractor
+        self._range_assigner = range_assigner
         self._parser = parser
         self._gap_handler = gap_handler
         self._enhancer = enhancer
@@ -81,10 +110,20 @@ class Pipeline:
                 marked = self._marker.mark(text, sentences)
                 s.attributes["tagged_text_length"] = len(marked.tagged_text)
 
-            # Stage 3: Query LLM
-            with self._tracer.span("llm.query") as s:
-                response = self._llm.query(marked)
-                s.attributes["response_length"] = len(response)
+            # Stage 3: Query LLM (single-stage or two-stage)
+            if self._llm is not None:
+                with self._tracer.span("llm.query") as s:
+                    response = self._llm.query(marked)
+                    s.attributes["response_length"] = len(response)
+            else:
+                assert self._topic_extractor is not None
+                assert self._range_assigner is not None
+                with self._tracer.span("topic_extract") as s:
+                    topics = self._topic_extractor.extract(marked)
+                    s.attributes["topic_count"] = len(topics)
+                with self._tracer.span("range_assign") as s:
+                    response = self._range_assigner.assign(marked, topics)
+                    s.attributes["response_length"] = len(response)
 
             # Stage 4: Parse response
             with self._tracer.span("parse") as s:
@@ -123,7 +162,9 @@ class Pipeline:
             return result
 
 
-def _validate_stage_compatibility(llm: LLMStrategy, parser: ResponseParser) -> None:
+def _validate_stage_compatibility(
+    llm: LLMStrategy | RangeAssigner, parser: ResponseParser
+) -> None:
     llm_format_obj = getattr(llm, "response_format", "text")
     parser_formats_obj = getattr(
         parser, "supported_response_formats", frozenset({"text"})

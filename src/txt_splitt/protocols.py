@@ -52,6 +52,18 @@ class GapHandler(Protocol):
     ) -> list[SentenceGroup]: ...
 
 
+class TopicExtractor(Protocol):
+    """Stage 3a: Extract topic labels from marked text."""
+
+    def extract(self, marked_text: MarkedText) -> list[str]: ...
+
+
+class RangeAssigner(Protocol):
+    """Stage 3b: Assign sentence ranges to given topics."""
+
+    def assign(self, marked_text: MarkedText, topics: list[str]) -> str: ...
+
+
 class MarkedTextChunker(Protocol):
     """Optional: split MarkedText into smaller chunks for LLM querying."""
 
