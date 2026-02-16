@@ -161,6 +161,80 @@ class Pipeline:
 
             return result
 
+    async def run_async(self, text: str) -> SplitResult:
+        """Run the pipeline with async range assignment.
+
+        Only works when using two-stage mode with an async range_assigner.
+        """
+        if self._range_assigner is None:
+            msg = "run_async requires two-stage mode with range_assigner"
+            raise RuntimeError(msg)
+        if not hasattr(self._range_assigner, "assign_async"):
+            msg = "range_assigner must support assign_async for async mode"
+            raise RuntimeError(msg)
+
+        with self._tracer.span("pipeline.run_async", input_length=len(text)):
+            # Stage 0 (optional): Clean HTML tags
+            mapping = None
+            if self._html_cleaner is not None:
+                with self._tracer.span("html_clean") as s:
+                    text, mapping = self._html_cleaner.clean(text)
+                    s.attributes["clean_length"] = len(text)
+
+            # Stage 1: Split into sentences
+            with self._tracer.span("split") as s:
+                sentences = self._splitter.split(text)
+                s.attributes["sentence_count"] = len(sentences)
+
+            # Stage 2: Apply markers
+            with self._tracer.span("mark") as s:
+                marked = self._marker.mark(text, sentences)
+                s.attributes["tagged_text_length"] = len(marked.tagged_text)
+
+            # Stage 3: Two-stage LLM (async)
+            with self._tracer.span("topic_extract") as s:
+                topics = self._topic_extractor.extract(marked)  # type: ignore[union-attr]
+                s.attributes["topic_count"] = len(topics)
+            with self._tracer.span("range_assign_async") as s:
+                response = await self._range_assigner.assign_async(marked, topics)  # type: ignore[attr-defined]
+                s.attributes["response_length"] = len(response)
+
+            # Stage 4: Parse response
+            with self._tracer.span("parse") as s:
+                groups = self._parser.parse(response, marked.sentence_count)
+                s.attributes["group_count"] = len(groups)
+
+            # Stage 5: Handle gaps
+            with self._tracer.span("gap_handler") as s:
+                groups = self._gap_handler.handle(
+                    groups, marked.sentence_count, sentences=sentences
+                )
+                s.attributes["group_count"] = len(groups)
+
+            # Stage 6 (optional): Enhance boundaries
+            if self._enhancer is not None:
+                with self._tracer.span("enhance") as s:
+                    groups = self._enhancer.enhance(groups, sentences)
+                    s.attributes["group_count"] = len(groups)
+
+            # Stage 7 (optional): Join adjacent groups
+            if self._joiner is not None:
+                with self._tracer.span("join") as s:
+                    groups = self._joiner.join(groups, sentences)
+                    sentences, groups = join_sentences_by_groups(groups, sentences)
+                    s.attributes["sentence_count"] = len(sentences)
+                    s.attributes["group_count"] = len(groups)
+
+            result = SplitResult(sentences=tuple(sentences), groups=tuple(groups))
+
+            # Stage 8 (optional): Restore original-text offsets
+            if self._offset_restorer is not None and mapping is not None:
+                with self._tracer.span("offset_restore") as s:
+                    result = self._offset_restorer.restore(result, mapping)
+                    s.attributes["sentence_count"] = len(result.sentences)
+
+            return result
+
 
 def _validate_stage_compatibility(
     llm: LLMStrategy | RangeAssigner, parser: ResponseParser

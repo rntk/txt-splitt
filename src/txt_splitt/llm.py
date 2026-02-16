@@ -172,6 +172,7 @@ class TopicRangeAssignmentLLM:
         chunker: MarkedTextChunker | None = None,
         output_mode: Literal["text", "json"] = "text",
         max_response_chars: int = 50_000,
+        max_concurrent_requests: int = 10,
     ) -> None:
         if output_mode not in {"text", "json"}:
             msg = f"output_mode must be 'text' or 'json', got {output_mode!r}"
@@ -179,11 +180,15 @@ class TopicRangeAssignmentLLM:
         if max_response_chars <= 0:
             msg = f"max_response_chars must be > 0, got {max_response_chars}"
             raise ValueError(msg)
+        if max_concurrent_requests <= 0:
+            msg = f"max_concurrent_requests must be > 0, got {max_concurrent_requests}"
+            raise ValueError(msg)
         self._client = client
         self._temperature = temperature
         self._chunker = chunker
         self._output_mode = output_mode
         self._max_response_chars = max_response_chars
+        self._max_concurrent_requests = max_concurrent_requests
         self._is_async = inspect.iscoroutinefunction(client.call)
 
     @property
@@ -259,9 +264,13 @@ class TopicRangeAssignmentLLM:
             _build_single_topic_range_prompt(marked_text.tagged_text, topic)
             for topic in topics
         ]
-        results = await asyncio.gather(
-            *[self._call_for_topic_async(prompt) for prompt in prompts]
-        )
+        sem = asyncio.Semaphore(self._max_concurrent_requests)
+
+        async def limited_call(prompt: str) -> str | None:
+            async with sem:
+                return await self._call_for_topic_async(prompt)
+
+        results = await asyncio.gather(*[limited_call(p) for p in prompts])
         lines: list[str] = []
         for topic, ranges_str in zip(topics, results, strict=True):
             if ranges_str is not None:
@@ -291,9 +300,13 @@ class TopicRangeAssignmentLLM:
             _build_single_topic_range_json_prompt(marked_text.tagged_text, topic)
             for topic in topics
         ]
-        results = await asyncio.gather(
-            *[self._call_for_topic_async(prompt) for prompt in prompts]
-        )
+        sem = asyncio.Semaphore(self._max_concurrent_requests)
+
+        async def limited_call(prompt: str) -> str | None:
+            async with sem:
+                return await self._call_for_topic_async(prompt)
+
+        results = await asyncio.gather(*[limited_call(p) for p in prompts])
         topic_entries: list[dict[str, object]] = []
         for topic, result in zip(topics, results, strict=True):
             if result is None:

@@ -2,6 +2,7 @@
 """Simple script to split text using LLamaCPP client and txt_splitt pipeline."""
 
 import argparse
+import asyncio
 import json
 import sys
 from datetime import datetime
@@ -30,7 +31,7 @@ from txt_splitt import (
     Tracer,
     TracingLLMCallable,
 )
-from txt_splitt.llms.llamacpp import LLamaCPP
+from txt_splitt.llms.llamacpp import AsyncLLamaCPP, LLamaCPP
 
 
 class LLamaCPPAdapter:
@@ -41,7 +42,18 @@ class LLamaCPPAdapter:
 
     def call(self, prompt: str, temperature: float) -> str:
         """Call the LLM with a prompt and temperature."""
-        return self._client.call([prompt], temperature=temperature)
+        return self._client.call([prompt], temperature=temperature)  # type: ignore[no-any-return]
+
+
+class AsyncLLamaCPPAdapter:
+    """Adapter to make AsyncLLamaCPP compatible with AsyncLLMCallable protocol."""
+
+    def __init__(self, client: AsyncLLamaCPP) -> None:
+        self._client = client
+
+    async def call(self, prompt: str, temperature: float) -> str:
+        """Call the LLM with a prompt and temperature."""
+        return await self._client.call([prompt], temperature=temperature)  # type: ignore[no-any-return]
 
 
 def result_to_dict(result: Any) -> dict[str, Any]:
@@ -394,7 +406,27 @@ def main() -> None:
         action="store_true",
         help="Enable tracing and print the trace after the run",
     )
+    parser.add_argument(
+        "--async",
+        dest="use_async",
+        action="store_true",
+        help="Use async LLM client with concurrent request limiting",
+    )
+    parser.add_argument(
+        "--max-concurrent",
+        type=int,
+        default=10,
+        help="Max concurrent requests for async mode (default: 10)",
+    )
     args = parser.parse_args()
+
+    if args.use_async:
+        asyncio.run(run_async(args))
+    else:
+        run_sync(args)
+
+
+def run_sync(args: Any) -> None:
 
     # Read input file
     input_path = Path(args.input_file)
@@ -409,13 +441,15 @@ def main() -> None:
     llm_adapter = LLamaCPPAdapter(llm_client)
 
     # Wrap with retry logic
-    llm_adapter = RetryingLLMCallable(llm_adapter, max_retries=3, backoff_factor=1.0)
+    llm_adapter_with_retry: LLMCallable = RetryingLLMCallable(
+        llm_adapter, max_retries=3, backoff_factor=1.0
+    )
 
     # Set up tracing if requested
     tracer: Tracer | None = Tracer() if args.trace else None
-    llm_callable: LLMCallable = llm_adapter
+    llm_callable: LLMCallable = llm_adapter_with_retry
     if tracer is not None:
-        llm_callable = TracingLLMCallable(llm_adapter, tracer)
+        llm_callable = TracingLLMCallable(llm_adapter_with_retry, tracer)
 
     splitter = SparseRegexSentenceSplitter(anchor_every_words=args.anchor_words)
     max_chunk_chars = args.max_chunk_chars
@@ -454,6 +488,90 @@ def main() -> None:
     trace_output: str | None = None
     try:
         result = pipeline.run(text)
+    except Exception as e:
+        print(f"Error processing text: {e}", file=sys.stderr)
+        sys.exit(1)
+    finally:
+        if tracer:
+            trace_output = tracer.format()
+            print(trace_output, file=sys.stderr)
+
+    # Generate output filename with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    input_stem = input_path.stem
+    output_file = Path(f"{input_stem}_report_{timestamp}.html")
+
+    # Generate and save report
+    report_html = generate_html_report(result, text, input_path, trace_output)
+    output_file.write_text(report_html, encoding="utf-8")
+
+    print(f"Results saved to '{output_file}'")
+    print(f"  - Sentences: {len(result.sentences)}")
+    print(f"  - Groups: {len(result.groups)}")
+
+
+async def run_async(args: Any) -> None:
+    """Run pipeline with async LLM client."""
+    # Read input file
+    input_path = Path(args.input_file)
+    if not input_path.exists():
+        print(f"Error: Input file '{args.input_file}' not found", file=sys.stderr)
+        sys.exit(1)
+
+    text = input_path.read_text(encoding="utf-8")
+
+    # Create sync LLM client for topic extraction and gap handling
+    sync_llm_client = LLamaCPP(host=args.host, model=args.model)
+    sync_llm_adapter = LLamaCPPAdapter(sync_llm_client)
+
+    # Create async LLM client for range assignment
+    async_llm_client = AsyncLLamaCPP(host=args.host, model=args.model)
+    async_llm_adapter = AsyncLLamaCPPAdapter(async_llm_client)
+
+    # Set up tracing if requested
+    tracer: Tracer | None = Tracer() if args.trace else None
+
+    splitter = SparseRegexSentenceSplitter(anchor_every_words=args.anchor_words)
+    max_chunk_chars = args.max_chunk_chars
+    html_cleaner = None
+    offset_restorer = None
+    if input_path.suffix.lower() in {".html", ".htm"}:
+        html_cleaner = TagStripCleaner()
+        offset_restorer = MappingOffsetRestorer()
+
+    # Create pipeline with async range assigner
+    pipeline = Pipeline(
+        splitter=splitter,
+        marker=OptimizingMarker(BracketMarker()),
+        topic_extractor=TopicListLLM(
+            client=sync_llm_adapter,
+            temperature=args.temperature,
+            chunker=OverlapChunker(max_chars=max_chunk_chars),
+        ),
+        range_assigner=TopicRangeAssignmentLLM(
+            client=async_llm_adapter,
+            temperature=args.temperature,
+            chunker=OverlapChunker(max_chars=max_chunk_chars),
+            max_concurrent_requests=args.max_concurrent,
+        ),
+        parser=TopicRangeParser(),
+        gap_handler=LLMRepairingGapHandler(
+            sync_llm_adapter, temperature=args.temperature, tracer=tracer
+        ),
+        joiner=AdjacentSameTopicJoiner(),
+        html_cleaner=html_cleaner,
+        offset_restorer=offset_restorer,
+        tracer=tracer,
+    )
+
+    # Run pipeline
+    print(
+        f"Processing '{args.input_file}' (async mode, "
+        f"max {args.max_concurrent} concurrent)..."
+    )
+    trace_output: str | None = None
+    try:
+        result = await pipeline.run_async(text)
     except Exception as e:
         print(f"Error processing text: {e}", file=sys.stderr)
         sys.exit(1)
