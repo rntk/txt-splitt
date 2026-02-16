@@ -18,6 +18,7 @@ from txt_splitt import (
     LLMCallable,
     LLMRepairingGapHandler,
     MappingOffsetRestorer,
+    OptimizingMarker,
     OverlapChunker,
     Pipeline,
     RetryingLLMCallable,
@@ -65,7 +66,12 @@ def result_to_dict(result: Any) -> dict[str, Any]:
     }
 
 
-def generate_html_report(result: Any, source_text: str, input_file: Path) -> str:
+def generate_html_report(
+    result: Any,
+    source_text: str,
+    input_file: Path,
+    trace_output: str | None = None,
+) -> str:
     """Generate HTML report content from split result."""
     data = result_to_dict(result)
     json_payload = json.dumps(data, indent=2)
@@ -164,13 +170,35 @@ def generate_html_report(result: Any, source_text: str, input_file: Path) -> str
         "        .json-block {",
         "            background: #fff;",
         "            border-radius: 8px;",
-        "            box-shadow: 0 2px 4px rgba(0,0,0,0.1);",
+            "            box-shadow: 0 2px 4px rgba(0,0,0,0.1);",
         "            margin-bottom: 30px;",
         "            padding: 20px;",
         "            border: 1px solid #e0e0e0;",
         "        }",
         "        .json-block h2 { margin-top: 0; color: #2c3e50; }",
         "        .original-file h2 { margin-top: 0; color: #2c3e50; }",
+        "        .report-tabs { margin-top: 10px; }",
+        "        .report-tab-buttons {",
+        "            display: inline-flex;",
+        "            gap: 6px;",
+        "            border-bottom: 1px solid #e0e0e0;",
+        "            margin-bottom: 8px;",
+        "        }",
+        "        .report-tab-button {",
+        "            background: transparent;",
+        "            border: none;",
+        "            padding: 6px 10px;",
+        "            cursor: pointer;",
+        "            font-size: 0.85rem;",
+        "            color: #2c3e50;",
+        "            border-bottom: 2px solid transparent;",
+        "        }",
+        "        .report-tab-button.active {",
+        "            border-bottom-color: #3498db;",
+        "            font-weight: 600;",
+        "        }",
+        "        .report-tab-panel { display: none; }",
+        "        .report-tab-panel.active { display: block; }",
         "        pre {",
         "            background: #f8f9fa;",
         "            padding: 15px;",
@@ -200,8 +228,23 @@ def generate_html_report(result: Any, source_text: str, input_file: Path) -> str
         f"        <pre><code>{escape(source_text)}</code></pre>",
         "    </div>",
         "    <div class='json-block'>",
-        "        <h2>Pipeline JSON</h2>",
-        f"        <pre><code>{escape(json_payload)}</code></pre>",
+        "        <h2>Diagnostics</h2>",
+        "        <div class='report-tabs'>",
+        "            <div class='report-tab-buttons'>",
+        "                <button class='report-tab-button active' "
+        "data-tab='json'>Pipeline JSON</button>",
+        "                <button class='report-tab-button' "
+        "data-tab='trace'>Trace</button>",
+        "            </div>",
+        "            <div class='report-tab-panel active' data-tab-panel='json'>",
+        f"                <pre><code>{escape(json_payload)}</code></pre>",
+        "            </div>",
+        "            <div class='report-tab-panel' data-tab-panel='trace'>",
+        "                <pre><code>"
+        f"{escape(trace_output if trace_output is not None else 'Trace disabled')}"
+        "</code></pre>",
+        "            </div>",
+        "        </div>",
         "    </div>",
     ]
 
@@ -288,6 +331,28 @@ def generate_html_report(result: Any, source_text: str, input_file: Path) -> str
             "                );",
             "            });",
             "        });",
+            "        document.addEventListener('click', (event) => {",
+            "            const button = event.target.closest('.report-tab-button');",
+            "            if (!button) {",
+            "                return;",
+            "            }",
+            "            const tabName = button.getAttribute('data-tab');",
+            "            const tabs = button.closest('.report-tabs');",
+            "            if (!tabs || !tabName) {",
+            "                return;",
+            "            }",
+            "            tabs.querySelectorAll('.report-tab-button')"
+            ".forEach((btn) => {",
+            "                btn.classList.toggle('active', btn === button);",
+            "            });",
+            "            tabs.querySelectorAll('.report-tab-panel')"
+            ".forEach((panel) => {",
+            "                panel.classList.toggle(",
+            "                    'active',",
+            "                    panel.getAttribute('data-tab-panel') === tabName",
+            "                );",
+            "            });",
+            "        });",
             "    </script>",
             "</body>",
             "</html>",
@@ -363,7 +428,7 @@ def main() -> None:
     # Create pipeline
     pipeline = Pipeline(
         splitter=splitter,
-        marker=BracketMarker(),
+        marker=OptimizingMarker(BracketMarker()),
         topic_extractor=TopicListLLM(
             client=llm_callable,
             temperature=args.temperature,
@@ -386,6 +451,7 @@ def main() -> None:
 
     # Run pipeline
     print(f"Processing '{args.input_file}'...")
+    trace_output: str | None = None
     try:
         result = pipeline.run(text)
     except Exception as e:
@@ -393,7 +459,8 @@ def main() -> None:
         sys.exit(1)
     finally:
         if tracer:
-            print(tracer.format(), file=sys.stderr)
+            trace_output = tracer.format()
+            print(trace_output, file=sys.stderr)
 
     # Generate output filename with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -401,7 +468,7 @@ def main() -> None:
     output_file = Path(f"{input_stem}_report_{timestamp}.html")
 
     # Generate and save report
-    report_html = generate_html_report(result, text, input_path)
+    report_html = generate_html_report(result, text, input_path, trace_output)
     output_file.write_text(report_html, encoding="utf-8")
 
     print(f"Results saved to '{output_file}'")
