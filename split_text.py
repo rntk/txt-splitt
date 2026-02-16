@@ -27,6 +27,7 @@ from txt_splitt import (
     TagStripCleaner,
     TopicListLLM,
     TopicRangeAssignmentLLM,
+    TopicRangeLLM,
     TopicRangeParser,
     Tracer,
     TracingLLMCallable,
@@ -418,6 +419,11 @@ def main() -> None:
         default=10,
         help="Max concurrent requests for async mode (default: 10)",
     )
+    parser.add_argument(
+        "--single-stage",
+        action="store_true",
+        help="Use single-stage LLM split instead of two-stage",
+    )
     args = parser.parse_args()
 
     if args.use_async:
@@ -460,28 +466,47 @@ def run_sync(args: Any) -> None:
         offset_restorer = MappingOffsetRestorer()
 
     # Create pipeline
-    pipeline = Pipeline(
-        splitter=splitter,
-        marker=OptimizingMarker(BracketMarker()),
-        topic_extractor=TopicListLLM(
-            client=llm_callable,
-            temperature=args.temperature,
-            chunker=OverlapChunker(max_chars=max_chunk_chars),
-        ),
-        range_assigner=TopicRangeAssignmentLLM(
-            client=llm_callable,
-            temperature=args.temperature,
-            chunker=OverlapChunker(max_chars=max_chunk_chars),
-        ),
-        parser=TopicRangeParser(),
-        gap_handler=LLMRepairingGapHandler(
-            llm_callable, temperature=args.temperature, tracer=tracer
-        ),
-        joiner=AdjacentSameTopicJoiner(),
-        html_cleaner=html_cleaner,
-        offset_restorer=offset_restorer,
-        tracer=tracer,
-    )
+    if args.single_stage:
+        pipeline = Pipeline(
+            splitter=splitter,
+            marker=OptimizingMarker(BracketMarker()),
+            llm=TopicRangeLLM(
+                client=llm_callable,
+                temperature=args.temperature,
+                chunker=OverlapChunker(max_chars=max_chunk_chars),
+            ),
+            parser=TopicRangeParser(),
+            gap_handler=LLMRepairingGapHandler(
+                llm_callable, temperature=args.temperature, tracer=tracer
+            ),
+            joiner=AdjacentSameTopicJoiner(),
+            html_cleaner=html_cleaner,
+            offset_restorer=offset_restorer,
+            tracer=tracer,
+        )
+    else:
+        pipeline = Pipeline(
+            splitter=splitter,
+            marker=OptimizingMarker(BracketMarker()),
+            topic_extractor=TopicListLLM(
+                client=llm_callable,
+                temperature=args.temperature,
+                chunker=OverlapChunker(max_chars=max_chunk_chars),
+            ),
+            range_assigner=TopicRangeAssignmentLLM(
+                client=llm_callable,
+                temperature=args.temperature,
+                chunker=OverlapChunker(max_chars=max_chunk_chars),
+            ),
+            parser=TopicRangeParser(),
+            gap_handler=LLMRepairingGapHandler(
+                llm_callable, temperature=args.temperature, tracer=tracer
+            ),
+            joiner=AdjacentSameTopicJoiner(),
+            html_cleaner=html_cleaner,
+            offset_restorer=offset_restorer,
+            tracer=tracer,
+        )
 
     # Run pipeline
     print(f"Processing '{args.input_file}'...")
@@ -540,29 +565,48 @@ async def run_async(args: Any) -> None:
         offset_restorer = MappingOffsetRestorer()
 
     # Create pipeline with async range assigner
-    pipeline = Pipeline(
-        splitter=splitter,
-        marker=OptimizingMarker(BracketMarker()),
-        topic_extractor=TopicListLLM(
-            client=sync_llm_adapter,
-            temperature=args.temperature,
-            chunker=OverlapChunker(max_chars=max_chunk_chars),
-        ),
-        range_assigner=TopicRangeAssignmentLLM(
-            client=async_llm_adapter,
-            temperature=args.temperature,
-            chunker=OverlapChunker(max_chars=max_chunk_chars),
-            max_concurrent_requests=args.max_concurrent,
-        ),
-        parser=TopicRangeParser(),
-        gap_handler=LLMRepairingGapHandler(
-            sync_llm_adapter, temperature=args.temperature, tracer=tracer
-        ),
-        joiner=AdjacentSameTopicJoiner(),
-        html_cleaner=html_cleaner,
-        offset_restorer=offset_restorer,
-        tracer=tracer,
-    )
+    if args.single_stage:
+        pipeline = Pipeline(
+            splitter=splitter,
+            marker=OptimizingMarker(BracketMarker()),
+            llm=TopicRangeLLM(
+                client=sync_llm_adapter,
+                temperature=args.temperature,
+                chunker=OverlapChunker(max_chars=max_chunk_chars),
+            ),
+            parser=TopicRangeParser(),
+            gap_handler=LLMRepairingGapHandler(
+                sync_llm_adapter, temperature=args.temperature, tracer=tracer
+            ),
+            joiner=AdjacentSameTopicJoiner(),
+            html_cleaner=html_cleaner,
+            offset_restorer=offset_restorer,
+            tracer=tracer,
+        )
+    else:
+        pipeline = Pipeline(
+            splitter=splitter,
+            marker=OptimizingMarker(BracketMarker()),
+            topic_extractor=TopicListLLM(
+                client=sync_llm_adapter,
+                temperature=args.temperature,
+                chunker=OverlapChunker(max_chars=max_chunk_chars),
+            ),
+            range_assigner=TopicRangeAssignmentLLM(
+                client=async_llm_adapter,
+                temperature=args.temperature,
+                chunker=OverlapChunker(max_chars=max_chunk_chars),
+                max_concurrent_requests=args.max_concurrent,
+            ),
+            parser=TopicRangeParser(),
+            gap_handler=LLMRepairingGapHandler(
+                sync_llm_adapter, temperature=args.temperature, tracer=tracer
+            ),
+            joiner=AdjacentSameTopicJoiner(),
+            html_cleaner=html_cleaner,
+            offset_restorer=offset_restorer,
+            tracer=tracer,
+        )
 
     # Run pipeline
     print(
