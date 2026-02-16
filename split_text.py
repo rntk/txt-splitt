@@ -183,7 +183,7 @@ def generate_html_report(
         "        .json-block {",
         "            background: #fff;",
         "            border-radius: 8px;",
-            "            box-shadow: 0 2px 4px rgba(0,0,0,0.1);",
+        "            box-shadow: 0 2px 4px rgba(0,0,0,0.1);",
         "            margin-bottom: 30px;",
         "            padding: 20px;",
         "            border: 1px solid #e0e0e0;",
@@ -473,12 +473,14 @@ def create_pipeline(
                 client=sync_llm,
                 temperature=args.temperature,
                 chunker=OverlapChunker(max_chars=args.max_chunk_chars),
+                tracer=tracer,
             ),
             range_assigner=TopicRangeAssignmentLLM(
                 client=async_llm or sync_llm,
                 temperature=args.temperature,
                 chunker=OverlapChunker(max_chars=args.max_chunk_chars),
                 max_concurrent_requests=args.max_concurrent if async_llm else None,
+                tracer=tracer,
             ),
             parser=TopicRangeParser(),
             gap_handler=LLMRepairingGapHandler(
@@ -549,9 +551,14 @@ async def run_async(args: Any) -> None:
     async_llm_adapter = AsyncLLamaCPPAdapter(async_llm_client)
 
     tracer: Tracer | None = Tracer() if args.trace else None
+    sync_llm_callable: LLMCallable = RetryingLLMCallable(
+        sync_llm_adapter, max_retries=3, backoff_factor=1.0
+    )
+    if tracer is not None:
+        sync_llm_callable = TracingLLMCallable(sync_llm_callable, tracer)
 
     pipeline = create_pipeline(
-        args, input_path, sync_llm_adapter, async_llm_adapter, tracer
+        args, input_path, sync_llm_callable, async_llm_adapter, tracer
     )
 
     print(

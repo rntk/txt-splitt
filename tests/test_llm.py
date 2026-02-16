@@ -8,6 +8,7 @@ import pytest
 
 from txt_splitt.errors import LLMError
 from txt_splitt.llm import TopicListLLM, TopicRangeAssignmentLLM, TopicRangeLLM
+from txt_splitt.tracer import Tracer
 from txt_splitt.types import MarkedText
 
 
@@ -635,6 +636,44 @@ class TestTopicRangeAssignmentLLM:
 
             assert result == "Technology>AI: 0-2\nSport>Football: 3-5"
             assert client.call_count == 2
+
+        asyncio.run(run_test())
+
+    def test_assign_async_traces_response(self) -> None:
+        """Async assignment writes merged response into tracer span."""
+        import asyncio
+
+        class AsyncClient:
+            async def call(self, prompt: str, temperature: float) -> str:
+                await asyncio.sleep(0.01)
+                if "Technology>AI" in prompt:
+                    return "0-2"
+                return "3-5"
+
+        async def run_test() -> None:
+            tracer = Tracer()
+            client = AsyncClient()
+            llm = TopicRangeAssignmentLLM(client, tracer=tracer)
+            topics = ["Technology>AI", "Sport>Football"]
+
+            mt = MarkedText(tagged_text="{0} A\n{1} B\n{2} C", sentence_count=3)
+            result = await llm.assign_async(mt, topics)
+
+            assert result == "Technology>AI: 0-2\nSport>Football: 3-5"
+            assert len(tracer.spans) == 1
+            span = tracer.spans[0]
+            assert span.name == "topic_range_assignment_llm.assign_async"
+            assert span.attributes["response"] == result
+            assert span.attributes["response_length"] == len(result)
+            assert len(span.children) == 2
+            for child in span.children:
+                assert child.name == "llm.call"
+                assert "<content>" in child.attributes["prompt"]
+                assert "</content>" in child.attributes["prompt"]
+                assert (
+                    "Assign sentence ranges for this topic:"
+                    in child.attributes["prompt"]
+                )
 
         asyncio.run(run_test())
 

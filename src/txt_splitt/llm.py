@@ -11,10 +11,12 @@ from typing import TYPE_CHECKING, Literal
 
 from txt_splitt.errors import LLMError
 from txt_splitt.protocols import AsyncLLMCallable, LLMCallable
+from txt_splitt.tracer import NoOpTracer
 from txt_splitt.types import MarkedText
 
 if TYPE_CHECKING:
     from txt_splitt.protocols import MarkedTextChunker
+    from txt_splitt.tracer import Tracer
 
 
 class TopicRangeLLM:
@@ -96,6 +98,7 @@ class TopicListLLM:
         temperature: float = 0.0,
         chunker: MarkedTextChunker | None = None,
         max_response_chars: int = 50_000,
+        tracer: Tracer | None = None,
     ) -> None:
         if max_response_chars <= 0:
             msg = f"max_response_chars must be > 0, got {max_response_chars}"
@@ -104,28 +107,32 @@ class TopicListLLM:
         self._temperature = temperature
         self._chunker = chunker
         self._max_response_chars = max_response_chars
+        self._tracer = tracer if tracer is not None else NoOpTracer()
 
     def extract(self, marked_text: MarkedText) -> list[str]:
-        chunks = (
-            self._chunker.chunk(marked_text)
-            if self._chunker is not None
-            else [marked_text]
-        )
+        with self._tracer.span("topic_list_llm.extract") as span:
+            chunks = (
+                self._chunker.chunk(marked_text)
+                if self._chunker is not None
+                else [marked_text]
+            )
+            span.attributes["chunk_count"] = len(chunks)
 
-        all_topics: list[str] = []
-        seen: set[str] = set()
-        for chunk in chunks:
-            raw = self._extract_single(chunk)
-            for line in raw.splitlines():
-                topic = line.strip()
-                if topic and topic not in seen:
-                    seen.add(topic)
-                    all_topics.append(topic)
+            all_topics: list[str] = []
+            seen: set[str] = set()
+            for chunk in chunks:
+                raw = self._extract_single(chunk)
+                for line in raw.splitlines():
+                    topic = line.strip()
+                    if topic and topic not in seen:
+                        seen.add(topic)
+                        all_topics.append(topic)
 
-        if not all_topics:
-            raise LLMError("No topics extracted from LLM response")
+            if not all_topics:
+                raise LLMError("No topics extracted from LLM response")
 
-        return all_topics
+            span.attributes["topic_count"] = len(all_topics)
+            return all_topics
 
     def _extract_single(self, marked_text: MarkedText) -> str:
         prompt = _build_topic_list_prompt(marked_text.tagged_text)
@@ -173,6 +180,7 @@ class TopicRangeAssignmentLLM:
         output_mode: Literal["text", "json"] = "text",
         max_response_chars: int = 50_000,
         max_concurrent_requests: int = 10,
+        tracer: Tracer | None = None,
     ) -> None:
         if output_mode not in {"text", "json"}:
             msg = f"output_mode must be 'text' or 'json', got {output_mode!r}"
@@ -190,6 +198,7 @@ class TopicRangeAssignmentLLM:
         self._max_response_chars = max_response_chars
         self._max_concurrent_requests = max_concurrent_requests
         self._is_async = inspect.iscoroutinefunction(client.call)
+        self._tracer = tracer if tracer is not None else NoOpTracer()
 
     @property
     def response_format(self) -> Literal["text", "json"]:
@@ -204,35 +213,44 @@ class TopicRangeAssignmentLLM:
             )
             raise RuntimeError(msg)
 
-        chunks = (
-            self._chunker.chunk(marked_text)
-            if self._chunker is not None
-            else [marked_text]
-        )
+        with self._tracer.span("topic_range_assignment_llm.assign") as span:
+            span.attributes["topic_count"] = len(topics)
+            chunks = (
+                self._chunker.chunk(marked_text)
+                if self._chunker is not None
+                else [marked_text]
+            )
+            span.attributes["chunk_count"] = len(chunks)
 
-        responses: list[str] = []
-        for chunk in chunks:
-            chunk_response = self._assign_single_sync(chunk, topics)
-            if chunk_response:
-                responses.append(chunk_response)
+            responses: list[str] = []
+            for chunk in chunks:
+                chunk_response = self._assign_single_sync(chunk, topics)
+                if chunk_response:
+                    responses.append(chunk_response)
 
-        return "\n".join(responses)
+            return "\n".join(responses)
 
     async def assign_async(self, marked_text: MarkedText, topics: list[str]) -> str:
         """Assign topics asynchronously. Works with both sync and async clients."""
-        chunks = (
-            self._chunker.chunk(marked_text)
-            if self._chunker is not None
-            else [marked_text]
-        )
+        with self._tracer.span("topic_range_assignment_llm.assign_async") as span:
+            span.attributes["topic_count"] = len(topics)
+            chunks = (
+                self._chunker.chunk(marked_text)
+                if self._chunker is not None
+                else [marked_text]
+            )
+            span.attributes["chunk_count"] = len(chunks)
 
-        responses: list[str] = []
-        for chunk in chunks:
-            chunk_response = await self._assign_single_async(chunk, topics)
-            if chunk_response:
-                responses.append(chunk_response)
+            responses: list[str] = []
+            for chunk in chunks:
+                chunk_response = await self._assign_single_async(chunk, topics)
+                if chunk_response:
+                    responses.append(chunk_response)
 
-        return "\n".join(responses)
+            merged_response = "\n".join(responses)
+            span.attributes["response_length"] = len(merged_response)
+            span.attributes["response"] = merged_response
+            return merged_response
 
     def _assign_single_sync(self, marked_text: MarkedText, topics: list[str]) -> str:
         if self._output_mode == "json":
@@ -331,29 +349,47 @@ class TopicRangeAssignmentLLM:
 
     def _call_for_topic_sync(self, prompt: str) -> str | None:
         """Call sync LLM for a single topic and return cleaned ranges, or ``None``."""
-        try:
-            response: str = self._client.call(prompt, temperature=self._temperature)  # type: ignore[assignment]
-        except LLMError:
-            raise
-        except Exception as e:
-            raise LLMError(f"LLM call failed: {e}") from e
-        return self._validate_response(response)
+        with self._tracer.span(
+            "llm.call",
+            prompt_length=len(prompt),
+            temperature=self._temperature,
+        ) as span:
+            span.attributes["prompt"] = prompt
+            try:
+                response: str = self._client.call(  # type: ignore[assignment]
+                    prompt, temperature=self._temperature
+                )
+            except LLMError:
+                raise
+            except Exception as e:
+                raise LLMError(f"LLM call failed: {e}") from e
+            span.attributes["response_length"] = len(response)
+            span.attributes["response"] = response
+            return self._validate_response(response)
 
     async def _call_for_topic_async(self, prompt: str) -> str | None:
         """Call async LLM for a single topic and return cleaned ranges, or ``None``."""
-        try:
-            if self._is_async:
-                response: str = await self._client.call(  # type: ignore[misc]
-                    prompt, temperature=self._temperature
-                )
-            else:
-                # Sync client in async context
-                response = self._client.call(prompt, temperature=self._temperature)  # type: ignore[assignment]
-        except LLMError:
-            raise
-        except Exception as e:
-            raise LLMError(f"LLM call failed: {e}") from e
-        return self._validate_response(response)
+        with self._tracer.span(
+            "llm.call",
+            prompt_length=len(prompt),
+            temperature=self._temperature,
+        ) as span:
+            span.attributes["prompt"] = prompt
+            try:
+                if self._is_async:
+                    response: str = await self._client.call(  # type: ignore[misc]
+                        prompt, temperature=self._temperature
+                    )
+                else:
+                    # Sync client in async context
+                    response = self._client.call(prompt, temperature=self._temperature)  # type: ignore[assignment]
+            except LLMError:
+                raise
+            except Exception as e:
+                raise LLMError(f"LLM call failed: {e}") from e
+            span.attributes["response_length"] = len(response)
+            span.attributes["response"] = response
+            return self._validate_response(response)
 
     def _validate_response(self, response: str) -> str | None:
         """Validate and clean LLM response. Returns None if invalid/empty."""
