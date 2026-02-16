@@ -1,5 +1,6 @@
 """Unit tests for the LLM stage."""
 
+import json
 from typing import Literal, cast
 from unittest.mock import MagicMock
 
@@ -402,9 +403,7 @@ class TestTopicListLLM:
 class TestTopicRangeAssignmentLLM:
     def test_successful_assignment(self) -> None:
         client = MagicMock()
-        client.call.return_value = (
-            "Technology>AI>GPT-4: 0-2\nSport>Football>England: 3-5"
-        )
+        client.call.side_effect = ["0-2", "3-5"]
         llm = TopicRangeAssignmentLLM(client)
         topics = ["Technology>AI>GPT-4", "Sport>Football>England"]
 
@@ -412,33 +411,75 @@ class TestTopicRangeAssignmentLLM:
         result = llm.assign(mt, topics)
 
         assert result == "Technology>AI>GPT-4: 0-2\nSport>Football>England: 3-5"
-        client.call.assert_called_once()
+        assert client.call.call_count == 2
 
-    def test_prompt_contains_topics(self) -> None:
+    def test_prompt_contains_single_topic(self) -> None:
         client = MagicMock()
-        client.call.return_value = "Technology>AI: 0"
+        client.call.side_effect = ["0", "1"]
         topics = ["Technology>AI", "Sport>Football"]
         llm = TopicRangeAssignmentLLM(client)
 
         mt = MarkedText(tagged_text="{0} Text", sentence_count=1)
         llm.assign(mt, topics)
 
-        args, _kwargs = client.call.call_args
-        prompt = args[0]
-        assert "- Technology>AI" in prompt
-        assert "- Sport>Football" in prompt
-        assert "<content>" in prompt
-        assert "</content>" in prompt
-        assert "TOPICS:" in prompt
+        # First call should contain first topic only
+        first_prompt = client.call.call_args_list[0][0][0]
+        assert "Technology>AI" in first_prompt
+        assert "Sport>Football" not in first_prompt
+        assert "<content>" in first_prompt
+        assert "</content>" in first_prompt
 
-    def test_empty_response_raises_error(self) -> None:
+        # Second call should contain second topic only
+        second_prompt = client.call.call_args_list[1][0][0]
+        assert "Sport>Football" in second_prompt
+
+    def test_kv_cache_common_prefix(self) -> None:
+        """Prompts for different topics share the same prefix for KV cache."""
         client = MagicMock()
-        client.call.return_value = ""
+        client.call.side_effect = ["0-1", "2-3"]
+        topics = ["Technology>AI", "Sport>Football"]
         llm = TopicRangeAssignmentLLM(client)
 
-        mt = MarkedText(tagged_text="...", sentence_count=1)
-        with pytest.raises(LLMError, match="Empty LLM response"):
-            llm.assign(mt, ["Technology>AI"])
+        mt = MarkedText(tagged_text="{0} A\n{1} B", sentence_count=2)
+        llm.assign(mt, topics)
+
+        prompt_1 = client.call.call_args_list[0][0][0]
+        prompt_2 = client.call.call_args_list[1][0][0]
+
+        # Everything before the topic line should be identical
+        prefix_1 = prompt_1.rsplit("Assign sentence ranges for this topic:\n", 1)[0]
+        prefix_2 = prompt_2.rsplit("Assign sentence ranges for this topic:\n", 1)[0]
+        assert prefix_1 == prefix_2
+
+    def test_none_response_skips_topic(self) -> None:
+        client = MagicMock()
+        client.call.side_effect = ["NONE", "3-5"]
+        llm = TopicRangeAssignmentLLM(client)
+
+        mt = MarkedText(tagged_text="{0} A", sentence_count=1)
+        result = llm.assign(mt, ["Technology>AI", "Sport>Football"])
+
+        assert result == "Sport>Football: 3-5"
+
+    def test_empty_response_skips_topic(self) -> None:
+        client = MagicMock()
+        client.call.side_effect = ["", "3-5"]
+        llm = TopicRangeAssignmentLLM(client)
+
+        mt = MarkedText(tagged_text="{0} A", sentence_count=1)
+        result = llm.assign(mt, ["Technology>AI", "Sport>Football"])
+
+        assert result == "Sport>Football: 3-5"
+
+    def test_all_topics_empty_returns_empty(self) -> None:
+        client = MagicMock()
+        client.call.side_effect = ["NONE", ""]
+        llm = TopicRangeAssignmentLLM(client)
+
+        mt = MarkedText(tagged_text="{0} A", sentence_count=1)
+        result = llm.assign(mt, ["Technology>AI", "Sport>Football"])
+
+        assert result == ""
 
     def test_client_exception_wrapped(self) -> None:
         client = MagicMock()
@@ -449,19 +490,51 @@ class TestTopicRangeAssignmentLLM:
         with pytest.raises(LLMError, match="LLM call failed: Network error"):
             llm.assign(mt, ["Technology>AI"])
 
+    def test_llm_error_propagates(self) -> None:
+        client = MagicMock()
+        client.call.side_effect = LLMError("Custom LLM error")
+        llm = TopicRangeAssignmentLLM(client)
+
+        mt = MarkedText(tagged_text="...", sentence_count=1)
+        with pytest.raises(LLMError, match="Custom LLM error"):
+            llm.assign(mt, ["Technology>AI"])
+
     def test_json_output_mode(self) -> None:
         client = MagicMock()
-        client.call.return_value = '{"topics":[]}'
+        client.call.side_effect = [
+            '[{"start": 0, "end": 2}]',
+            '[{"start": 3, "end": 5}]',
+        ]
+        llm = TopicRangeAssignmentLLM(client, output_mode="json")
+        topics = ["Technology>AI", "Sport>Football"]
+
+        mt = MarkedText(tagged_text="{0} Text", sentence_count=1)
+        result = llm.assign(mt, topics)
+
+        parsed = json.loads(result)
+        assert len(parsed["topics"]) == 2
+        assert parsed["topics"][0]["label"] == ["Technology", "AI"]
+        assert parsed["topics"][0]["ranges"] == [{"start": 0, "end": 2}]
+        assert parsed["topics"][1]["label"] == ["Sport", "Football"]
+        assert parsed["topics"][1]["ranges"] == [{"start": 3, "end": 5}]
+
+        # Check JSON prompt format
+        args, _kwargs = client.call.call_args_list[0]
+        prompt = args[0]
+        assert "JSON array" in prompt
+        assert llm.response_format == "json"
+
+    def test_json_none_topic_skipped(self) -> None:
+        client = MagicMock()
+        client.call.side_effect = ["[]", '[{"start": 3, "end": 5}]']
         llm = TopicRangeAssignmentLLM(client, output_mode="json")
 
         mt = MarkedText(tagged_text="{0} Text", sentence_count=1)
-        llm.assign(mt, ["Technology>AI"])
+        result = llm.assign(mt, ["Technology>AI", "Sport>Football"])
 
-        args, _kwargs = client.call.call_args
-        prompt = args[0]
-        assert "JSON SCHEMA:" in prompt
-        assert "Return ONLY valid JSON" in prompt
-        assert llm.response_format == "json"
+        parsed = json.loads(result)
+        assert len(parsed["topics"]) == 1
+        assert parsed["topics"][0]["label"] == ["Sport", "Football"]
 
     def test_invalid_output_mode_raises(self) -> None:
         client = MagicMock()
@@ -485,7 +558,7 @@ class TestTopicRangeAssignmentLLM:
 
     def test_custom_temperature_is_forwarded(self) -> None:
         client = MagicMock()
-        client.call.return_value = "Technology>AI: 0"
+        client.call.return_value = "0"
         llm = TopicRangeAssignmentLLM(client, temperature=0.3)
 
         mt = MarkedText(tagged_text="{0} Text", sentence_count=1)
@@ -496,9 +569,12 @@ class TestTopicRangeAssignmentLLM:
 
     def test_chunker_concatenates_responses(self) -> None:
         client = MagicMock()
+        # chunk1: topic1=0-2, topic2=NONE; chunk2: topic1=NONE, topic2=3-5
         client.call.side_effect = [
-            "Technology>AI: 0-2",
-            "Sport>Football: 3-5",
+            "0-2",  # chunk1, Technology>AI
+            "NONE",  # chunk1, Sport>Football
+            "NONE",  # chunk2, Technology>AI
+            "3-5",  # chunk2, Sport>Football
         ]
 
         chunker = MagicMock()
@@ -515,27 +591,21 @@ class TestTopicRangeAssignmentLLM:
         result = llm.assign(mt, topics)
 
         assert result == "Technology>AI: 0-2\nSport>Football: 3-5"
-        assert client.call.call_count == 2
+        assert client.call.call_count == 4  # 2 chunks x 2 topics
 
-    def test_chunker_passes_all_topics_to_each_chunk(self) -> None:
+    def test_per_topic_prompt_has_content_tags(self) -> None:
         client = MagicMock()
-        client.call.side_effect = [
-            "Technology>AI: 0-2",
-            "Sport>Football: 3-5",
-        ]
-
-        chunker = MagicMock()
-        chunk_a = MarkedText(tagged_text="{0} A", sentence_count=1)
-        chunk_b = MarkedText(tagged_text="{1} B", sentence_count=1)
-        chunker.chunk.return_value = [chunk_a, chunk_b]
+        client.call.side_effect = ["0-2", "3-5"]
 
         topics = ["Technology>AI", "Sport>Football"]
-        llm = TopicRangeAssignmentLLM(client, chunker=chunker)
+        llm = TopicRangeAssignmentLLM(client)
         mt = MarkedText(tagged_text="{0} A\n{1} B", sentence_count=2)
         llm.assign(mt, topics)
 
-        # Both calls should contain all topics in the prompt
-        for call_args in client.call.call_args_list:
+        # Each per-topic prompt should include content and its own topic
+        for i, call_args in enumerate(client.call.call_args_list):
             prompt = call_args[0][0]
-            assert "- Technology>AI" in prompt
-            assert "- Sport>Football" in prompt
+            assert "<content>" in prompt
+            assert "</content>" in prompt
+            assert "{0} A" in prompt
+            assert topics[i] in prompt
