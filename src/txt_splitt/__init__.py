@@ -47,6 +47,11 @@ from txt_splitt.splitters import (
     RegexSentenceSplitter,
     SparseRegexSentenceSplitter,
 )
+from txt_splitt.text_optimizers import (
+    OptimizingMarker,
+    is_content_free,
+    normalize_for_llm,
+)
 from txt_splitt.tracer import NoOpSpan, NoOpTracer, Span, Tracer, TracingLLMCallable
 from txt_splitt.types import (
     MarkedText,
@@ -89,6 +94,9 @@ __all__ = [
     "OverlapChunker",
     "SizeBasedChunker",
     "NormalizingSplitter",
+    "OptimizingMarker",
+    "is_content_free",
+    "normalize_for_llm",
     "HTMLParserTagStripCleaner",
     "TagStripCleaner",
     "AdjacentSameTopicJoiner",
