@@ -17,6 +17,12 @@ class LLMCallable(Protocol):
     def call(self, prompt: str, temperature: float) -> str: ...
 
 
+class AsyncLLMCallable(Protocol):
+    """Protocol for async LLM client callables."""
+
+    async def call(self, prompt: str, temperature: float) -> str: ...
+
+
 class SentenceSplitter(Protocol):
     """Stage 1: Split raw text into sentences."""
 

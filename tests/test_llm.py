@@ -609,3 +609,130 @@ class TestTopicRangeAssignmentLLM:
             assert "</content>" in prompt
             assert "{0} A" in prompt
             assert topics[i] in prompt
+
+    def test_async_client_executes_in_parallel(self) -> None:
+        """Test that async clients are detected and executed in parallel."""
+        import asyncio
+
+        class AsyncClient:
+            def __init__(self) -> None:
+                self.call_count = 0
+
+            async def call(self, prompt: str, temperature: float) -> str:
+                self.call_count += 1
+                await asyncio.sleep(0.01)  # Simulate async I/O
+                if "Technology>AI" in prompt:
+                    return "0-2"
+                return "3-5"
+
+        async def run_test() -> None:
+            client = AsyncClient()
+            llm = TopicRangeAssignmentLLM(client)
+            topics = ["Technology>AI", "Sport>Football"]
+
+            mt = MarkedText(tagged_text="{0} A\n{1} B\n{2} C", sentence_count=3)
+            result = await llm.assign_async(mt, topics)
+
+            assert result == "Technology>AI: 0-2\nSport>Football: 3-5"
+            assert client.call_count == 2
+
+        asyncio.run(run_test())
+
+    def test_async_client_json_mode(self) -> None:
+        """Test async client with JSON output mode."""
+        import asyncio
+
+        class AsyncClient:
+            async def call(self, prompt: str, temperature: float) -> str:
+                await asyncio.sleep(0.01)
+                if "Technology>AI" in prompt:
+                    return '[{"start": 0, "end": 2}]'
+                return '[{"start": 3, "end": 5}]'
+
+        async def run_test() -> None:
+            client = AsyncClient()
+            llm = TopicRangeAssignmentLLM(client, output_mode="json")
+            topics = ["Technology>AI", "Sport>Football"]
+
+            mt = MarkedText(tagged_text="{0} Text", sentence_count=1)
+            result = await llm.assign_async(mt, topics)
+
+            parsed = json.loads(result)
+            assert len(parsed["topics"]) == 2
+            assert parsed["topics"][0]["label"] == ["Technology", "AI"]
+            assert parsed["topics"][1]["label"] == ["Sport", "Football"]
+
+        asyncio.run(run_test())
+
+    def test_async_client_with_chunker(self) -> None:
+        """Test async client works correctly with chunking."""
+        import asyncio
+
+        class AsyncClient:
+            def __init__(self) -> None:
+                self.call_count = 0
+
+            async def call(self, prompt: str, temperature: float) -> str:
+                self.call_count += 1
+                await asyncio.sleep(0.01)
+                # chunk1: topic1=0-2, topic2=NONE; chunk2: topic1=NONE, topic2=3-5
+                if "{0} A" in prompt and "Technology>AI" in prompt:
+                    return "0-2"
+                if "{0} A" in prompt and "Sport>Football" in prompt:
+                    return "NONE"
+                if "{3} D" in prompt and "Technology>AI" in prompt:
+                    return "NONE"
+                if "{3} D" in prompt and "Sport>Football" in prompt:
+                    return "3-5"
+                return "NONE"
+
+        async def run_test() -> None:
+            chunker = MagicMock()
+            chunk_a = MarkedText(tagged_text="{0} A\n{1} B\n{2} C", sentence_count=3)
+            chunk_b = MarkedText(tagged_text="{3} D\n{4} E\n{5} F", sentence_count=3)
+            chunker.chunk.return_value = [chunk_a, chunk_b]
+
+            client = AsyncClient()
+            topics = ["Technology>AI", "Sport>Football"]
+            llm = TopicRangeAssignmentLLM(client, chunker=chunker)
+            mt = MarkedText(
+                tagged_text="{0} A\n{1} B\n{2} C\n{3} D\n{4} E\n{5} F",
+                sentence_count=6,
+            )
+            result = await llm.assign_async(mt, topics)
+
+            assert result == "Technology>AI: 0-2\nSport>Football: 3-5"
+            # 2 chunks x 2 topics (parallelized per chunk)
+            assert client.call_count == 4
+
+        asyncio.run(run_test())
+
+    def test_sync_client_with_assign_async(self) -> None:
+        """Test that sync clients work with assign_async()."""
+        import asyncio
+
+        client = MagicMock()
+        client.call.side_effect = ["0-2", "3-5"]
+        llm = TopicRangeAssignmentLLM(client)
+        topics = ["Technology>AI", "Sport>Football"]
+
+        async def run_test() -> None:
+            mt = MarkedText(tagged_text="{0} A\n{1} B\n{2} C", sentence_count=3)
+            result = await llm.assign_async(mt, topics)
+            assert result == "Technology>AI: 0-2\nSport>Football: 3-5"
+
+        asyncio.run(run_test())
+
+    def test_async_client_with_sync_assign_raises(self) -> None:
+        """Test that using assign() with async client raises clear error."""
+
+        class AsyncClient:
+            async def call(self, prompt: str, temperature: float) -> str:
+                return "0-2"
+
+        client = AsyncClient()
+        llm = TopicRangeAssignmentLLM(client)
+        mt = MarkedText(tagged_text="{0} A", sentence_count=1)
+
+        with pytest.raises(RuntimeError, match="Cannot use assign.*async client"):
+            llm.assign(mt, ["Technology>AI"])

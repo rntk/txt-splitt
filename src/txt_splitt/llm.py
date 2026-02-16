@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import json
 import re
 from collections import Counter
 from typing import TYPE_CHECKING, Literal
 
 from txt_splitt.errors import LLMError
-from txt_splitt.protocols import LLMCallable
+from txt_splitt.protocols import AsyncLLMCallable, LLMCallable
 from txt_splitt.types import MarkedText
 
 if TYPE_CHECKING:
@@ -157,11 +159,14 @@ class TopicRangeAssignmentLLM:
     prefix (instructions + content) is identical across calls so the
     KV cache is reused — only the topic suffix changes.  The LLM
     generates only the sentence ranges, not the topic name.
+
+    Supports both sync and async LLM clients. For async clients, use
+    assign_async() to avoid event loop conflicts.
     """
 
     def __init__(
         self,
-        client: LLMCallable,
+        client: LLMCallable | AsyncLLMCallable,
         *,
         temperature: float = 0.0,
         chunker: MarkedTextChunker | None = None,
@@ -179,12 +184,21 @@ class TopicRangeAssignmentLLM:
         self._chunker = chunker
         self._output_mode = output_mode
         self._max_response_chars = max_response_chars
+        self._is_async = inspect.iscoroutinefunction(client.call)
 
     @property
     def response_format(self) -> Literal["text", "json"]:
         return self._output_mode
 
     def assign(self, marked_text: MarkedText, topics: list[str]) -> str:
+        """Assign topics synchronously. Only works with sync clients."""
+        if self._is_async:
+            msg = (
+                "Cannot use assign() with async client. "
+                "Use assign_async() or asyncio.run(llm.assign_async(...)) instead."
+            )
+            raise RuntimeError(msg)
+
         chunks = (
             self._chunker.chunk(marked_text)
             if self._chunker is not None
@@ -193,53 +207,143 @@ class TopicRangeAssignmentLLM:
 
         responses: list[str] = []
         for chunk in chunks:
-            chunk_response = self._assign_single(chunk, topics)
+            chunk_response = self._assign_single_sync(chunk, topics)
             if chunk_response:
                 responses.append(chunk_response)
 
         return "\n".join(responses)
 
-    def _assign_single(self, marked_text: MarkedText, topics: list[str]) -> str:
-        if self._output_mode == "json":
-            return self._assign_topics_json(marked_text, topics)
-        return self._assign_topics_text(marked_text, topics)
+    async def assign_async(self, marked_text: MarkedText, topics: list[str]) -> str:
+        """Assign topics asynchronously. Works with both sync and async clients."""
+        chunks = (
+            self._chunker.chunk(marked_text)
+            if self._chunker is not None
+            else [marked_text]
+        )
 
-    def _assign_topics_text(self, marked_text: MarkedText, topics: list[str]) -> str:
+        responses: list[str] = []
+        for chunk in chunks:
+            chunk_response = await self._assign_single_async(chunk, topics)
+            if chunk_response:
+                responses.append(chunk_response)
+
+        return "\n".join(responses)
+
+    def _assign_single_sync(self, marked_text: MarkedText, topics: list[str]) -> str:
+        if self._output_mode == "json":
+            return self._assign_topics_json_sync(marked_text, topics)
+        return self._assign_topics_text_sync(marked_text, topics)
+
+    async def _assign_single_async(
+        self, marked_text: MarkedText, topics: list[str]
+    ) -> str:
+        if self._output_mode == "json":
+            return await self._assign_topics_json_async(marked_text, topics)
+        return await self._assign_topics_text_async(marked_text, topics)
+
+    def _assign_topics_text_sync(
+        self, marked_text: MarkedText, topics: list[str]
+    ) -> str:
         lines: list[str] = []
         for topic in topics:
             prompt = _build_single_topic_range_prompt(marked_text.tagged_text, topic)
-            ranges_str = self._call_for_topic(prompt)
+            ranges_str = self._call_for_topic_sync(prompt)
             if ranges_str is not None:
                 lines.append(f"{topic}: {ranges_str}")
         return "\n".join(lines)
 
-    def _assign_topics_json(self, marked_text: MarkedText, topics: list[str]) -> str:
+    async def _assign_topics_text_async(
+        self, marked_text: MarkedText, topics: list[str]
+    ) -> str:
+        prompts = [
+            _build_single_topic_range_prompt(marked_text.tagged_text, topic)
+            for topic in topics
+        ]
+        results = await asyncio.gather(
+            *[self._call_for_topic_async(prompt) for prompt in prompts]
+        )
+        lines: list[str] = []
+        for topic, ranges_str in zip(topics, results, strict=True):
+            if ranges_str is not None:
+                lines.append(f"{topic}: {ranges_str}")
+        return "\n".join(lines)
+
+    def _assign_topics_json_sync(
+        self, marked_text: MarkedText, topics: list[str]
+    ) -> str:
         topic_entries: list[dict[str, object]] = []
         for topic in topics:
             prompt = _build_single_topic_range_json_prompt(
                 marked_text.tagged_text, topic
             )
-            ranges_str = self._call_for_topic(prompt)
+            ranges_str = self._call_for_topic_sync(prompt)
             if ranges_str is None:
                 continue
-            label: list[str] = [p.strip() for p in topic.split(">") if p.strip()]
-            try:
-                ranges = json.loads(ranges_str)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(ranges, list) and ranges:
-                topic_entries.append({"label": label, "ranges": ranges})
+            entry = self._parse_json_topic(topic, ranges_str)
+            if entry is not None:
+                topic_entries.append(entry)
         return json.dumps({"topics": topic_entries})
 
-    def _call_for_topic(self, prompt: str) -> str | None:
-        """Call LLM for a single topic and return cleaned ranges, or ``None``."""
+    async def _assign_topics_json_async(
+        self, marked_text: MarkedText, topics: list[str]
+    ) -> str:
+        prompts = [
+            _build_single_topic_range_json_prompt(marked_text.tagged_text, topic)
+            for topic in topics
+        ]
+        results = await asyncio.gather(
+            *[self._call_for_topic_async(prompt) for prompt in prompts]
+        )
+        topic_entries: list[dict[str, object]] = []
+        for topic, result in zip(topics, results, strict=True):
+            if result is None:
+                continue
+            entry = self._parse_json_topic(topic, result)
+            if entry is not None:
+                topic_entries.append(entry)
+        return json.dumps({"topics": topic_entries})
+
+    def _parse_json_topic(
+        self, topic: str, ranges_str: str
+    ) -> dict[str, object] | None:
+        """Parse JSON ranges for a topic. Returns None if invalid."""
+        label: list[str] = [p.strip() for p in topic.split(">") if p.strip()]
         try:
-            response = self._client.call(prompt, temperature=self._temperature)
+            ranges = json.loads(ranges_str)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(ranges, list) and ranges:
+            return {"label": label, "ranges": ranges}
+        return None
+
+    def _call_for_topic_sync(self, prompt: str) -> str | None:
+        """Call sync LLM for a single topic and return cleaned ranges, or ``None``."""
+        try:
+            response: str = self._client.call(prompt, temperature=self._temperature)  # type: ignore[assignment]
         except LLMError:
             raise
         except Exception as e:
             raise LLMError(f"LLM call failed: {e}") from e
+        return self._validate_response(response)
 
+    async def _call_for_topic_async(self, prompt: str) -> str | None:
+        """Call async LLM for a single topic and return cleaned ranges, or ``None``."""
+        try:
+            if self._is_async:
+                response: str = await self._client.call(  # type: ignore[misc]
+                    prompt, temperature=self._temperature
+                )
+            else:
+                # Sync client in async context
+                response = self._client.call(prompt, temperature=self._temperature)  # type: ignore[assignment]
+        except LLMError:
+            raise
+        except Exception as e:
+            raise LLMError(f"LLM call failed: {e}") from e
+        return self._validate_response(response)
+
+    def _validate_response(self, response: str) -> str | None:
+        """Validate and clean LLM response. Returns None if invalid/empty."""
         if not response or not response.strip():
             return None
 
