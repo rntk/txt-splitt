@@ -432,52 +432,33 @@ def main() -> None:
         run_sync(args)
 
 
-def run_sync(args: Any) -> None:
-
-    # Read input file
-    input_path = Path(args.input_file)
-    if not input_path.exists():
-        print(f"Error: Input file '{args.input_file}' not found", file=sys.stderr)
-        sys.exit(1)
-
-    text = input_path.read_text(encoding="utf-8")
-
-    # Create LLM client and adapter
-    llm_client = LLamaCPP(host=args.host, model=args.model)
-    llm_adapter = LLamaCPPAdapter(llm_client)
-
-    # Wrap with retry logic
-    llm_adapter_with_retry: LLMCallable = RetryingLLMCallable(
-        llm_adapter, max_retries=3, backoff_factor=1.0
-    )
-
-    # Set up tracing if requested
-    tracer: Tracer | None = Tracer() if args.trace else None
-    llm_callable: LLMCallable = llm_adapter_with_retry
-    if tracer is not None:
-        llm_callable = TracingLLMCallable(llm_adapter_with_retry, tracer)
-
+def create_pipeline(
+    args: Any,
+    input_path: Path,
+    sync_llm: LLMCallable,
+    async_llm: Any = None,
+    tracer: Tracer | None = None,
+) -> Pipeline:
+    """Create pipeline with appropriate configuration."""
     splitter = SparseRegexSentenceSplitter(anchor_every_words=args.anchor_words)
-    max_chunk_chars = args.max_chunk_chars
     html_cleaner = None
     offset_restorer = None
     if input_path.suffix.lower() in {".html", ".htm"}:
         html_cleaner = TagStripCleaner()
         offset_restorer = MappingOffsetRestorer()
 
-    # Create pipeline
     if args.single_stage:
-        pipeline = Pipeline(
+        return Pipeline(
             splitter=splitter,
             marker=OptimizingMarker(BracketMarker()),
             llm=TopicRangeLLM(
-                client=llm_callable,
+                client=sync_llm,
                 temperature=args.temperature,
-                chunker=OverlapChunker(max_chars=max_chunk_chars),
+                chunker=OverlapChunker(max_chars=args.max_chunk_chars),
             ),
             parser=TopicRangeParser(),
             gap_handler=LLMRepairingGapHandler(
-                llm_callable, temperature=args.temperature, tracer=tracer
+                sync_llm, temperature=args.temperature, tracer=tracer
             ),
             joiner=AdjacentSameTopicJoiner(),
             html_cleaner=html_cleaner,
@@ -485,22 +466,23 @@ def run_sync(args: Any) -> None:
             tracer=tracer,
         )
     else:
-        pipeline = Pipeline(
+        return Pipeline(
             splitter=splitter,
             marker=OptimizingMarker(BracketMarker()),
             topic_extractor=TopicListLLM(
-                client=llm_callable,
+                client=sync_llm,
                 temperature=args.temperature,
-                chunker=OverlapChunker(max_chars=max_chunk_chars),
+                chunker=OverlapChunker(max_chars=args.max_chunk_chars),
             ),
             range_assigner=TopicRangeAssignmentLLM(
-                client=llm_callable,
+                client=async_llm or sync_llm,
                 temperature=args.temperature,
-                chunker=OverlapChunker(max_chars=max_chunk_chars),
+                chunker=OverlapChunker(max_chars=args.max_chunk_chars),
+                max_concurrent_requests=args.max_concurrent if async_llm else None,
             ),
             parser=TopicRangeParser(),
             gap_handler=LLMRepairingGapHandler(
-                llm_callable, temperature=args.temperature, tracer=tracer
+                sync_llm, temperature=args.temperature, tracer=tracer
             ),
             joiner=AdjacentSameTopicJoiner(),
             html_cleaner=html_cleaner,
@@ -508,7 +490,28 @@ def run_sync(args: Any) -> None:
             tracer=tracer,
         )
 
-    # Run pipeline
+
+def run_sync(args: Any) -> None:
+    input_path = Path(args.input_file)
+    if not input_path.exists():
+        print(f"Error: Input file '{args.input_file}' not found", file=sys.stderr)
+        sys.exit(1)
+
+    text = input_path.read_text(encoding="utf-8")
+
+    llm_client = LLamaCPP(host=args.host, model=args.model)
+    llm_adapter = LLamaCPPAdapter(llm_client)
+    llm_with_retry: LLMCallable = RetryingLLMCallable(
+        llm_adapter, max_retries=3, backoff_factor=1.0
+    )
+
+    tracer: Tracer | None = Tracer() if args.trace else None
+    llm_callable: LLMCallable = llm_with_retry
+    if tracer is not None:
+        llm_callable = TracingLLMCallable(llm_with_retry, tracer)
+
+    pipeline = create_pipeline(args, input_path, llm_callable, tracer=tracer)
+
     print(f"Processing '{args.input_file}'...")
     trace_output: str | None = None
     try:
@@ -521,12 +524,8 @@ def run_sync(args: Any) -> None:
             trace_output = tracer.format()
             print(trace_output, file=sys.stderr)
 
-    # Generate output filename with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    input_stem = input_path.stem
-    output_file = Path(f"{input_stem}_report_{timestamp}.html")
-
-    # Generate and save report
+    output_file = Path(f"{input_path.stem}_report_{timestamp}.html")
     report_html = generate_html_report(result, text, input_path, trace_output)
     output_file.write_text(report_html, encoding="utf-8")
 
@@ -537,7 +536,6 @@ def run_sync(args: Any) -> None:
 
 async def run_async(args: Any) -> None:
     """Run pipeline with async LLM client."""
-    # Read input file
     input_path = Path(args.input_file)
     if not input_path.exists():
         print(f"Error: Input file '{args.input_file}' not found", file=sys.stderr)
@@ -545,70 +543,17 @@ async def run_async(args: Any) -> None:
 
     text = input_path.read_text(encoding="utf-8")
 
-    # Create sync LLM client for topic extraction and gap handling
     sync_llm_client = LLamaCPP(host=args.host, model=args.model)
     sync_llm_adapter = LLamaCPPAdapter(sync_llm_client)
-
-    # Create async LLM client for range assignment
     async_llm_client = AsyncLLamaCPP(host=args.host, model=args.model)
     async_llm_adapter = AsyncLLamaCPPAdapter(async_llm_client)
 
-    # Set up tracing if requested
     tracer: Tracer | None = Tracer() if args.trace else None
 
-    splitter = SparseRegexSentenceSplitter(anchor_every_words=args.anchor_words)
-    max_chunk_chars = args.max_chunk_chars
-    html_cleaner = None
-    offset_restorer = None
-    if input_path.suffix.lower() in {".html", ".htm"}:
-        html_cleaner = TagStripCleaner()
-        offset_restorer = MappingOffsetRestorer()
+    pipeline = create_pipeline(
+        args, input_path, sync_llm_adapter, async_llm_adapter, tracer
+    )
 
-    # Create pipeline with async range assigner
-    if args.single_stage:
-        pipeline = Pipeline(
-            splitter=splitter,
-            marker=OptimizingMarker(BracketMarker()),
-            llm=TopicRangeLLM(
-                client=sync_llm_adapter,
-                temperature=args.temperature,
-                chunker=OverlapChunker(max_chars=max_chunk_chars),
-            ),
-            parser=TopicRangeParser(),
-            gap_handler=LLMRepairingGapHandler(
-                sync_llm_adapter, temperature=args.temperature, tracer=tracer
-            ),
-            joiner=AdjacentSameTopicJoiner(),
-            html_cleaner=html_cleaner,
-            offset_restorer=offset_restorer,
-            tracer=tracer,
-        )
-    else:
-        pipeline = Pipeline(
-            splitter=splitter,
-            marker=OptimizingMarker(BracketMarker()),
-            topic_extractor=TopicListLLM(
-                client=sync_llm_adapter,
-                temperature=args.temperature,
-                chunker=OverlapChunker(max_chars=max_chunk_chars),
-            ),
-            range_assigner=TopicRangeAssignmentLLM(
-                client=async_llm_adapter,
-                temperature=args.temperature,
-                chunker=OverlapChunker(max_chars=max_chunk_chars),
-                max_concurrent_requests=args.max_concurrent,
-            ),
-            parser=TopicRangeParser(),
-            gap_handler=LLMRepairingGapHandler(
-                sync_llm_adapter, temperature=args.temperature, tracer=tracer
-            ),
-            joiner=AdjacentSameTopicJoiner(),
-            html_cleaner=html_cleaner,
-            offset_restorer=offset_restorer,
-            tracer=tracer,
-        )
-
-    # Run pipeline
     print(
         f"Processing '{args.input_file}' (async mode, "
         f"max {args.max_concurrent} concurrent)..."
@@ -624,12 +569,8 @@ async def run_async(args: Any) -> None:
             trace_output = tracer.format()
             print(trace_output, file=sys.stderr)
 
-    # Generate output filename with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    input_stem = input_path.stem
-    output_file = Path(f"{input_stem}_report_{timestamp}.html")
-
-    # Generate and save report
+    output_file = Path(f"{input_path.stem}_report_{timestamp}.html")
     report_html = generate_html_report(result, text, input_path, trace_output)
     output_file.write_text(report_html, encoding="utf-8")
 
