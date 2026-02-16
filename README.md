@@ -2,6 +2,20 @@
 
 A python package to split text.
 
+## How it Works
+
+The pipeline processes input text through a sequence of stages to produce semantic segments:
+
+1. **HTML Cleaning** (Optional): Strips tags while preserving offset data to allow mapping back to the original source.
+2. **Sentence Splitting**: Breaks the text into individual sentence units.
+3. **Marking**: Indexes sentences to prepare them for LLM reference.
+4. **Semantic Analysis**: Uses an LLM to identify topics and ranges. Supports both single-pass and two-stage (topic extraction followed by assignment) strategies.
+5. **Parsing**: Interprets the LLM's output into structured groups.
+6. **Gap Handling**: Validates coverage and assigns any skipped sentences or gaps to ensure completeness.
+7. **Enhancement** (Optional): Refines boundaries by re-evaluating ambiguous sentences at group edges.
+8. **Joining** (Optional): Merges adjacent groups that share the same topic or fit specific criteria.
+9. **Offset Restoration** (Optional): Maps the final segmented text back to the original source positions (e.g., restoring HTML context).
+
 ## Installation
 
 Install from a GitHub URL:
