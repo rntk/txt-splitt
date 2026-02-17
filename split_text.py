@@ -33,7 +33,7 @@ from txt_splitt import (
     TracingLLMCallable,
 )
 from txt_splitt.llms.llamacpp import AsyncLLamaCPP, LLamaCPP
-from txt_splitt.llms.openai import AsyncOpenAIClient, OpenAIClient
+from txt_splitt.llms.openai import OpenAIClient
 
 
 class LLamaCPPAdapter:
@@ -56,28 +56,6 @@ class AsyncLLamaCPPAdapter:
     async def call(self, prompt: str, temperature: float) -> str:
         """Call the LLM with a prompt and temperature."""
         return await self._client.call([prompt], temperature=temperature)  # type: ignore[no-any-return]
-
-
-class OpenAIClientAdapter:
-    """Adapter to make OpenAIClient compatible with LLMCallable protocol."""
-
-    def __init__(self, client: OpenAIClient) -> None:
-        self._client = client
-
-    def call(self, prompt: str, temperature: float) -> str:
-        """Call the LLM with a prompt and temperature."""
-        return self._client.call(prompt, temperature=temperature)
-
-
-class AsyncOpenAIClientAdapter:
-    """Adapter to make AsyncOpenAIClient compatible with AsyncLLMCallable protocol."""
-
-    def __init__(self, client: AsyncOpenAIClient) -> None:
-        self._client = client
-
-    async def call(self, prompt: str, temperature: float) -> str:
-        """Call the LLM with a prompt and temperature."""
-        return await self._client.call(prompt, temperature=temperature)
 
 
 def result_to_dict(result: Any) -> dict[str, Any]:
@@ -600,7 +578,7 @@ async def run_async(args: Any) -> None:
         base_url=args.base_url,
         organization=args.organization,
     )
-    async_llm_adapter = AsyncOpenAIClient(
+    async_llm_adapter = OpenAIClient(
         model=args.model,
         api_key=args.api_key,
         base_url=args.base_url,
