@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import html
+import unicodedata
 from typing import TypeAlias
 
 from txt_splitt.errors import GapError
@@ -386,6 +388,13 @@ def _resolve_gap_sentence_owner(
             span.attributes["decision"] = "previous_no_next_neighbor"
             return prev_owner
 
+        sentence_text = sentences[sentence_index].text
+        if _is_trash_sentence(sentence_text):
+            owner = prev_owner if prev_owner is not None else next_owner
+            span.attributes["decision"] = "trash_sentence_skipped_llm"
+            span.attributes["resolved_owner"] = _owner_debug_label(owner, groups)
+            return owner
+
         prev_context = _gather_context(
             sentences, ownership, prev_owner, sentence_index, -1
         )
@@ -394,13 +403,13 @@ def _resolve_gap_sentence_owner(
         )
 
         prompt = _build_gap_prompt(
-            sentence_text=sentences[sentence_index].text,
+            sentence_text=sentence_text,
             prev_label=groups[prev_owner].label,
             prev_context=prev_context,
             next_label=groups[next_owner].label,
             next_context=next_context,
         )
-        span.attributes["sentence_text"] = sentences[sentence_index].text
+        span.attributes["sentence_text"] = sentence_text
         span.attributes["prev_label"] = " > ".join(groups[prev_owner].label)
         span.attributes["next_label"] = " > ".join(groups[next_owner].label)
         span.attributes["prev_context"] = prev_context
@@ -543,6 +552,23 @@ def _indices_to_ranges(indices: list[int]) -> list[SentenceRange]:
 
     ranges.append(SentenceRange(start=start, end=end))
     return ranges
+
+
+def _is_trash_sentence(text: str) -> bool:
+    """Return True if a sentence contains no meaningful content.
+
+    Decodes HTML entities first, then checks whether every remaining
+    character is invisible (control, format, or space-separator category).
+    Examples that return True: "&#173;&#847;", "&nbsp;", "&#8199;".
+    """
+    decoded = html.unescape(text)
+    stripped = decoded.strip()
+    if not stripped:
+        return True
+    return all(
+        unicodedata.category(c) in ("Cc", "Cf", "Zs", "Zl", "Zp")
+        for c in stripped
+    )
 
 
 def _owner_debug_label(owner: int | None, groups: list[SentenceGroup]) -> str:

@@ -24,7 +24,7 @@ from txt_splitt import (
     Pipeline,
     RetryingLLMCallable,
     SparseRegexSentenceSplitter,
-    TagStripCleaner,
+    HTMLParserTagStripCleaner,
     TopicListLLM,
     TopicRangeAssignmentLLM,
     TopicRangeLLM,
@@ -444,7 +444,7 @@ def create_pipeline(
     html_cleaner = None
     offset_restorer = None
     if input_path.suffix.lower() in {".html", ".htm"}:
-        html_cleaner = TagStripCleaner()
+        html_cleaner = HTMLParserTagStripCleaner(strip_tags={"style", "script"})
         offset_restorer = MappingOffsetRestorer()
 
     if args.single_stage:
