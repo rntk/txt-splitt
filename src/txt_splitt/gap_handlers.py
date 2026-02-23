@@ -558,7 +558,7 @@ def _is_trash_sentence(text: str) -> bool:
     """Return True if a sentence contains no meaningful content.
 
     Decodes HTML entities first, then checks whether every remaining
-    character is invisible (control, format, or space-separator category).
+    character is invisible (control, format, mark, or separator category).
     Examples that return True: "&#173;&#847;", "&nbsp;", "&#8199;".
     """
     decoded = html.unescape(text)
@@ -566,7 +566,7 @@ def _is_trash_sentence(text: str) -> bool:
     if not stripped:
         return True
     return all(
-        unicodedata.category(c) in ("Cc", "Cf", "Zs", "Zl", "Zp")
+        unicodedata.category(c) in ("Cc", "Cf", "Mn", "Mc", "Me", "Zs", "Zl", "Zp")
         for c in stripped
     )
 
