@@ -31,3 +31,7 @@ class EnhancerError(SplitterError):
 
 class HtmlCleanError(SplitterError):
     """Raised when HTML cleaning or offset restoration fails."""
+
+
+class KeywordError(SplitterError):
+    """Base exception for keyword extraction pipeline errors."""
