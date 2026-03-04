@@ -522,20 +522,22 @@ BAD KEYWORDS (too generic or inconsistent):
 ✗ "Postgres" (use "PostgreSQL"), "JS" (use "JavaScript"), "K8s" (use "Kubernetes")
 
 GOOD KEYWORDS (specific, searchable, and canonical):
-✓ "PostgreSQL: indexing" (not "Database Tips", "Postgres indexing")
-✓ "Python: asyncio" (not "Programming", "Python async patterns")
-✓ "React: hooks" (not "Frontend", "React.js hooks")
+✓ "PostgreSQL>Indexing" (not "Database Tips", "Postgres indexing")
+✓ "Python>Asyncio" (not "Programming", "Python async patterns")
+✓ "React>Hooks" (not "Frontend", "React.js hooks")
 ✓ "GPT-4" (not "OpenAI GPT-4", "GPT-4 model")
 
 SEMANTIC DISTINCTIVENESS:
 If multiple sections share a theme, differentiate them:
-- ✓ "AI: medical imaging" and "AI: drug discovery" (not just "AI" for both)
-- ✓ "PostgreSQL: indexing" and "PostgreSQL: replication" (not just "PostgreSQL")
+- ✓ "AI>Medical Imaging" and "AI>Drug Discovery" (not just "AI" for both)
+- ✓ "PostgreSQL>Indexing" and "PostgreSQL>Replication" (not just "PostgreSQL")
 
 SPECIFICITY BALANCE:
 - General topic → use canonical name: "PostgreSQL", "Python", "React"
-- Specific aspect → use qualified form: "PostgreSQL: indexing", "Python: asyncio"
-- Don't over-specify: "React: hooks" not "React hooks useState optimization patterns"
+- Specific aspect → add another ">" level: "PostgreSQL>Indexing", "Python>Asyncio"
+- Don't over-specify: "React>Hooks" not "React hooks useState optimization patterns"
+- Use ":" only once per output line, immediately before sentence ranges.
+- Do NOT use ":" inside topic path segments.
 
 OUTPUT FORMAT (exactly one hierarchy per line):
 CategoryLevel1>CategoryLevel2>...>SpecificTopic: SentenceRanges
@@ -692,20 +694,21 @@ BAD KEYWORDS (too generic or inconsistent):
 ✗ "Postgres" (use "PostgreSQL"), "JS" (use "JavaScript"), "K8s" (use "Kubernetes")
 
 GOOD KEYWORDS (specific, searchable, and canonical):
-✓ "PostgreSQL: indexing" (not "Database Tips", "Postgres indexing")
-✓ "Python: asyncio" (not "Programming", "Python async patterns")
-✓ "React: hooks" (not "Frontend", "React.js hooks")
+✓ "PostgreSQL>Indexing" (not "Database Tips", "Postgres indexing")
+✓ "Python>Asyncio" (not "Programming", "Python async patterns")
+✓ "React>Hooks" (not "Frontend", "React.js hooks")
 ✓ "GPT-4" (not "OpenAI GPT-4", "GPT-4 model")
 
 SEMANTIC DISTINCTIVENESS:
 If multiple sections share a theme, differentiate them:
-- ✓ "AI: medical imaging" and "AI: drug discovery" (not just "AI" for both)
-- ✓ "PostgreSQL: indexing" and "PostgreSQL: replication" (not just "PostgreSQL")
+- ✓ "AI>Medical Imaging" and "AI>Drug Discovery" (not just "AI" for both)
+- ✓ "PostgreSQL>Indexing" and "PostgreSQL>Replication" (not just "PostgreSQL")
 
 SPECIFICITY BALANCE:
 - General topic → use canonical name: "PostgreSQL", "Python", "React"
-- Specific aspect → use qualified form: "PostgreSQL: indexing", "Python: asyncio"
-- Don't over-specify: "React: hooks" not "React hooks useState optimization patterns"
+- Specific aspect → add another ">" level: "PostgreSQL>Indexing", "Python>Asyncio"
+- Don't over-specify: "React>Hooks" not "React hooks useState optimization patterns"
+- Do NOT use ":" inside topic path segments.
 
 OUTPUT FORMAT (exactly one topic per line, NO sentence ranges):
 CategoryLevel1>CategoryLevel2>...>SpecificTopic
