@@ -6,6 +6,8 @@ from http.client import HTTPConnection, HTTPSConnection
 from typing import List, Union
 from urllib.parse import urlparse
 
+from txt_splitt.tracer import add_span_attribute
+
 
 class LLamaCPP:
     ALLOWED_MODELS = ["default"]
@@ -44,9 +46,15 @@ class LLamaCPP:
             return err_msg
         resp = json.loads(resp_body)
 
-        content = resp["choices"][0]["message"]["content"]
-        # Remove <think></think> tags and their content
-        content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL)
+        full_content = resp["choices"][0]["message"]["content"]
+
+        # Extract <think></think> tags and their content for tracing
+        reasoning_match = re.search(r"<think>(.*?)</think>", full_content, flags=re.DOTALL)
+        if reasoning_match:
+            add_span_attribute("reasoning", reasoning_match.group(1).strip())
+
+        # Remove <think></think> tags and their content from the final answer
+        content = re.sub(r"<think>.*?</think>", "", full_content, flags=re.DOTALL).strip()
         return content
 
     def get_connection(self) -> Union[HTTPConnection, HTTPSConnection]:
@@ -99,8 +107,14 @@ class AsyncLLamaCPP:
             return err_msg
         resp = json.loads(resp_body)
 
-        content = resp["choices"][0]["message"]["content"]
-        content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL)
+        full_content = resp["choices"][0]["message"]["content"]
+
+        # Extract <think></think> tags and their content for tracing
+        reasoning_match = re.search(r"<think>(.*?)</think>", full_content, flags=re.DOTALL)
+        if reasoning_match:
+            add_span_attribute("reasoning", reasoning_match.group(1).strip())
+
+        content = re.sub(r"<think>.*?</think>", "", full_content, flags=re.DOTALL).strip()
         return content
 
     def _get_connection(self) -> Union[HTTPConnection, HTTPSConnection]:

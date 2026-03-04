@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Generator
 
@@ -25,6 +26,17 @@ class Span:
         if self.end_time is None:
             return 0.0
         return (self.end_time - self.start_time) * 1000
+
+
+# Global context variable to track the active span for the current task/thread.
+_ACTIVE_SPAN: ContextVar[Span | NoOpSpan | None] = ContextVar("_ACTIVE_SPAN", default=None)
+
+
+def add_span_attribute(name: str, value: Any) -> None:
+    """Add an attribute to the currently active span, if any."""
+    span = _ACTIVE_SPAN.get()
+    if span is not None:
+        span.attributes[name] = value
 
 
 class Tracer:
@@ -61,9 +73,12 @@ class Tracer:
         else:
             self._root_spans.append(s)
         self._stack.append(s)
+
+        token = _ACTIVE_SPAN.set(s)
         try:
             yield s
         finally:
+            _ACTIVE_SPAN.reset(token)
             s.end_time = time.monotonic()
             self._stack.pop()
 
@@ -101,7 +116,12 @@ class NoOpTracer:
     @contextmanager
     def span(self, name: str, **attributes: Any) -> Generator[NoOpSpan, None, None]:
         """Create a no-op span that does nothing."""
-        yield NoOpSpan()
+        s = NoOpSpan()
+        token = _ACTIVE_SPAN.set(s)
+        try:
+            yield s
+        finally:
+            _ACTIVE_SPAN.reset(token)
 
     def format(self) -> str:
         """Return empty string (no traces collected)."""
