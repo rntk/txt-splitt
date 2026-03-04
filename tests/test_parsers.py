@@ -221,6 +221,49 @@ class TestTopicRangeParser:
         assert result[0].label == ("Technology", "AI")
         assert result[0].ranges == (SentenceRange(start=0, end=2),)
 
+    def test_colon_in_topic_name_single_range(self) -> None:
+        response = "Technology>Hardware>Apple: Mac Mini production: 6-20"
+        result = self.parser.parse(response, sentence_count=25)
+        assert len(result) == 1
+        assert result[0].label == (
+            "Technology",
+            "Hardware",
+            "Apple",
+            "Mac Mini production",
+        )
+        assert result[0].ranges == (SentenceRange(start=6, end=20),)
+
+    def test_colon_in_topic_name_multiple_ranges(self) -> None:
+        response = "Technology>AI>GPT-4: overview: 0-5, 10-15"
+        result = self.parser.parse(response, sentence_count=20)
+        assert len(result) == 1
+        assert result[0].label == ("Technology", "AI", "GPT-4", "overview")
+        assert result[0].ranges == (
+            SentenceRange(start=0, end=5),
+            SentenceRange(start=10, end=15),
+        )
+
+    def test_colon_in_topic_name_mixed_with_normal(self) -> None:
+        response = (
+            "Technology>Hardware>Apple: Mac Mini production: 6-20\nScience>Climate: 0-5"
+        )
+        result = self.parser.parse(response, sentence_count=25)
+        assert len(result) == 2
+        assert result[0].label == (
+            "Technology",
+            "Hardware",
+            "Apple",
+            "Mac Mini production",
+        )
+        assert result[1].label == ("Science", "Climate")
+
+    def test_multiple_colons_expand_to_multiple_levels(self) -> None:
+        response = "Technology>Cloud>AWS: Security: IAM: 1-2"
+        result = self.parser.parse(response, sentence_count=5)
+        assert len(result) == 1
+        assert result[0].label == ("Technology", "Cloud", "AWS", "Security", "IAM")
+        assert result[0].ranges == (SentenceRange(start=1, end=2),)
+
     def test_auto_mode_falls_back_to_text(self) -> None:
         parser = TopicRangeParser(input_mode="auto")
         result = parser.parse("Technology>AI: 0-2", sentence_count=3)

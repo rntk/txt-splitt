@@ -2,6 +2,7 @@
 
 import json
 import re
+from collections.abc import Iterable
 from typing import Literal
 
 from txt_splitt.errors import ParseError
@@ -11,6 +12,11 @@ from txt_splitt.types import SentenceGroup, SentenceRange
 _RANGE_PATTERN = re.compile(r"(\d+)\s*-\s*(\d+)")
 _SINGLE_NUMBER_PATTERN = re.compile(r"(\d+)")
 
+# Greedy match for topic line: grabs the longest possible topic path,
+# then expects a colon followed by digit-starting range content.
+# Handles colons in topic names like "Apple: Mac Mini production: 6-20".
+_TOPIC_LINE_PATTERN = re.compile(r"^(.+):\s*(\d[\d\s,\-]*)\s*$")
+
 
 class TopicRangeParser:
     """Parse LLM topic-range responses into sentence groups.
@@ -19,6 +25,7 @@ class TopicRangeParser:
         Category>Subcategory>Topic: 0-5, 10-15
 
     Labels are split by '>' into a tuple.
+    Any ':' inside a label segment is normalized into an additional '>' level.
     Ranges are clamped to [0, sentence_count-1] and sorted by start.
     Does NOT fill gaps or validate coverage (that's the GapHandler's job).
     """
@@ -59,17 +66,23 @@ def _parse_text_groups(response: str, sentence_count: int) -> list[SentenceGroup
     label_order: list[tuple[str, ...]] = []
 
     for ln in lines:
-        if ":" not in ln:
+        # Try greedy regex first (handles colons in topic names)
+        match = _TOPIC_LINE_PATTERN.match(ln)
+        if match:
+            topic_path = match.group(1).strip()
+            ranges_str = match.group(2).strip()
+        elif ":" in ln:
+            # Fallback for lines with non-digit range content (e.g. "nope, 2-3")
+            topic_path, ranges_str = ln.split(":", 1)
+            topic_path = topic_path.strip()
+            ranges_str = ranges_str.strip()
+        else:
             continue
-
-        topic_path, ranges_str = ln.split(":", 1)
-        topic_path = topic_path.strip()
-        ranges_str = ranges_str.strip()
 
         if not topic_path:
             continue
 
-        label = tuple(part.strip() for part in topic_path.split(">") if part.strip())
+        label = _normalize_label_parts(topic_path.split(">"))
         if not label:
             continue
 
@@ -105,10 +118,8 @@ def _parse_json_groups(response: str, sentence_count: int) -> list[SentenceGroup
             label_obj = topic.get("label")
             if not isinstance(label_obj, list):
                 continue
-            label = tuple(
-                part.strip()
-                for part in label_obj
-                if isinstance(part, str) and part.strip()
+            label = _normalize_label_parts(
+                part for part in label_obj if isinstance(part, str)
             )
             if not label:
                 continue
@@ -183,6 +194,25 @@ def _build_groups(
         raise ParseError("No valid topic ranges found in response")
 
     return groups
+
+
+def _normalize_label_parts(parts: Iterable[str]) -> tuple[str, ...]:
+    """Normalize label parts to always use ">" as the hierarchy separator.
+
+    Any ':' characters inside label segments are treated as sub-level separators.
+    This keeps parsing tolerant of model outputs like "Apple: Mac Mini production"
+    while canonicalizing final labels to ("Apple", "Mac Mini production").
+    """
+    normalized: list[str] = []
+    for raw_part in parts:
+        part = raw_part.strip()
+        if not part:
+            continue
+        for sub_part in part.split(":"):
+            sub = sub_part.strip()
+            if sub:
+                normalized.append(sub)
+    return tuple(normalized)
 
 
 def _parse_range_string(ranges_str: str) -> list[tuple[int, int]]:
