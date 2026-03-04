@@ -349,47 +349,31 @@ class TopicRangeAssignmentLLM:
 
     def _call_for_topic_sync(self, prompt: str) -> str | None:
         """Call sync LLM for a single topic and return cleaned ranges, or ``None``."""
-        with self._tracer.span(
-            "llm.call",
-            prompt_length=len(prompt),
-            temperature=self._temperature,
-        ) as span:
-            span.attributes["prompt"] = prompt
-            try:
-                response: str = self._client.call(  # type: ignore[assignment]
-                    prompt, temperature=self._temperature
-                )
-            except LLMError:
-                raise
-            except Exception as e:
-                raise LLMError(f"LLM call failed: {e}") from e
-            span.attributes["response_length"] = len(response)
-            span.attributes["response"] = response
-            return self._validate_response(response)
+        try:
+            response: str = self._client.call(  # type: ignore[assignment]
+                prompt, temperature=self._temperature
+            )
+        except LLMError:
+            raise
+        except Exception as e:
+            raise LLMError(f"LLM call failed: {e}") from e
+        return self._validate_response(response)
 
     async def _call_for_topic_async(self, prompt: str) -> str | None:
         """Call async LLM for a single topic and return cleaned ranges, or ``None``."""
-        with self._tracer.span(
-            "llm.call",
-            prompt_length=len(prompt),
-            temperature=self._temperature,
-        ) as span:
-            span.attributes["prompt"] = prompt
-            try:
-                if self._is_async:
-                    response: str = await self._client.call(  # type: ignore[misc]
-                        prompt, temperature=self._temperature
-                    )
-                else:
-                    # Sync client in async context
-                    response = self._client.call(prompt, temperature=self._temperature)  # type: ignore[assignment]
-            except LLMError:
-                raise
-            except Exception as e:
-                raise LLMError(f"LLM call failed: {e}") from e
-            span.attributes["response_length"] = len(response)
-            span.attributes["response"] = response
-            return self._validate_response(response)
+        try:
+            if self._is_async:
+                response: str = await self._client.call(  # type: ignore[misc]
+                    prompt, temperature=self._temperature
+                )
+            else:
+                # Sync client in async context
+                response = self._client.call(prompt, temperature=self._temperature)  # type: ignore[assignment]
+        except LLMError:
+            raise
+        except Exception as e:
+            raise LLMError(f"LLM call failed: {e}") from e
+        return self._validate_response(response)
 
     def _validate_response(self, response: str) -> str | None:
         """Validate and clean LLM response. Returns None if invalid/empty."""

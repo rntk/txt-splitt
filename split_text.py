@@ -30,6 +30,7 @@ from txt_splitt import (
     TopicRangeLLM,
     TopicRangeParser,
     Tracer,
+    TracingAsyncLLMCallable,
     TracingLLMCallable,
 )
 from txt_splitt.llms.llamacpp import AsyncLLamaCPP, LLamaCPP
@@ -554,11 +555,13 @@ async def run_async(args: Any) -> None:
     sync_llm_callable: LLMCallable = RetryingLLMCallable(
         sync_llm_adapter, max_retries=3, backoff_factor=1.0
     )
+    async_llm_callable = async_llm_adapter
     if tracer is not None:
         sync_llm_callable = TracingLLMCallable(sync_llm_callable, tracer)
+        async_llm_callable = TracingAsyncLLMCallable(async_llm_adapter, tracer)
 
     pipeline = create_pipeline(
-        args, input_path, sync_llm_callable, async_llm_adapter, tracer
+        args, input_path, sync_llm_callable, async_llm_callable, tracer
     )
 
     print(

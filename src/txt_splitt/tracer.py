@@ -95,7 +95,14 @@ def _format_span(span: Span, lines: list[str], indent: int) -> None:
     dur = f"{span.duration_ms:.1f}ms"
     lines.append(f"{prefix}[TRACE] {span.name} ({dur})")
     for key, value in span.attributes.items():
-        lines.append(f"{prefix}  {key}: {value}")
+        if not value:
+            continue
+        if isinstance(value, str) and "\n" in value:
+            lines.append(f"{prefix}  {key}:")
+            for line in value.splitlines():
+                lines.append(f"{prefix}    {line}")
+        else:
+            lines.append(f"{prefix}  {key}: {value}")
     for child in span.children:
         _format_span(child, lines, indent + 1)
 
@@ -142,7 +149,29 @@ class TracingLLMCallable:
             temperature=temperature,
         ) as s:
             response = self._inner.call(prompt, temperature)
-            s.attributes["response_length"] = len(response)
-            s.attributes["prompt"] = prompt
-            s.attributes["response"] = response
+            # Use setdefault to avoid overwriting attributes already set by the inner client
+            s.attributes.setdefault("response_length", len(response))
+            s.attributes.setdefault("prompt", prompt)
+            s.attributes.setdefault("response", response)
+            return response
+
+
+class TracingAsyncLLMCallable:
+    """Wrapper that records every async LLM call as a tracer span."""
+
+    def __init__(self, inner: Any, tracer: Tracer) -> None:
+        self._inner = inner
+        self._tracer = tracer
+
+    async def call(self, prompt: str, temperature: float) -> str:
+        with self._tracer.span(
+            "llm.call",
+            prompt_length=len(prompt),
+            temperature=temperature,
+        ) as s:
+            response = await self._inner.call(prompt, temperature)
+            # Use setdefault to avoid overwriting attributes already set by the inner client
+            s.attributes.setdefault("response_length", len(response))
+            s.attributes.setdefault("prompt", prompt)
+            s.attributes.setdefault("response", response)
             return response

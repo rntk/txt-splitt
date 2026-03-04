@@ -70,7 +70,14 @@ from txt_splitt.text_optimizers import (
     is_content_free,
     normalize_for_llm,
 )
-from txt_splitt.tracer import NoOpSpan, NoOpTracer, Span, Tracer, TracingLLMCallable
+from txt_splitt.tracer import (
+    NoOpSpan,
+    NoOpTracer,
+    Span,
+    Tracer,
+    TracingAsyncLLMCallable,
+    TracingLLMCallable,
+)
 from txt_splitt.types import (
     MarkedText,
     OffsetMapping,
@@ -159,6 +166,7 @@ __all__ = [
     "NoOpTracer",
     "Span",
     "Tracer",
+    "TracingAsyncLLMCallable",
     "TracingLLMCallable",
     # Errors
     "EnhancerError",
