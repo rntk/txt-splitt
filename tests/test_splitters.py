@@ -570,3 +570,94 @@ class TestHtmlAwareSentenceSplitter:
         assert any("Block" in t for t in texts)
         for s in result:
             assert text[s.start : s.end] == s.text
+
+
+class TestClosingQuoteBoundary:
+    """Closing quotes after sentence-ending punctuation must not block splits."""
+
+    def test_curly_closing_quote_regex_splitter(self) -> None:
+        splitter = RegexSentenceSplitter()
+        text = "He said \u201chello.\u201d She replied."
+        result = splitter.split(text)
+        assert len(result) == 2
+        assert result[0].text == "He said \u201chello.\u201d"
+        assert result[1].text == "She replied."
+
+    def test_curly_closing_quote_sparse_splitter(self) -> None:
+        splitter = SparseRegexSentenceSplitter(anchor_every_words=24)
+        text = 'Lambo demand is \u201cclose to zero.\u201d Amazon opened a campus.'
+        result = splitter.split(text)
+        assert len(result) == 2
+        assert result[0].text == 'Lambo demand is \u201cclose to zero.\u201d'
+        assert result[1].text == "Amazon opened a campus."
+
+    def test_curly_closing_quote_dense_splitter(self) -> None:
+        splitter = DenseRegexSentenceSplitter(anchor_every_words=24)
+        text = "First sentence.\u201d Second sentence."
+        result = splitter.split(text)
+        assert len(result) == 2
+
+    def test_straight_closing_quote(self) -> None:
+        splitter = RegexSentenceSplitter()
+        text = 'He said "done." Next step follows.'
+        result = splitter.split(text)
+        assert len(result) == 2
+        assert result[1].text == "Next step follows."
+
+    def test_closing_paren(self) -> None:
+        splitter = RegexSentenceSplitter()
+        text = "The deal closed (finally.) Next steps were taken."
+        result = splitter.split(text)
+        assert len(result) == 2
+        assert result[1].text == "Next steps were taken."
+
+    def test_accented_uppercase_lookahead(self) -> None:
+        splitter = RegexSentenceSplitter()
+        # É is Latin Extended capital — should trigger sentence boundary
+        text = "C\u2019est fini. \u00c9videmment il a raison."
+        result = splitter.split(text)
+        assert len(result) == 2
+        assert result[1].text == "\u00c9videmment il a raison."
+
+    def test_ellipsis_boundary(self) -> None:
+        splitter = RegexSentenceSplitter()
+        text = "He trailed off\u2026 Then she spoke."
+        result = splitter.split(text)
+        assert len(result) == 2
+        assert result[0].text == "He trailed off\u2026"
+        assert result[1].text == "Then she spoke."
+
+
+class TestEmDashNotSplitting:
+    """Em-dash should NOT create sentence boundaries in SparseRegexSentenceSplitter."""
+
+    def test_em_dash_parenthetical_not_split(self) -> None:
+        splitter = SparseRegexSentenceSplitter(anchor_every_words=24)
+        text = "Amazon opened a campus \u2014 its biggest \u2014 for employees."
+        result = splitter.split(text)
+        assert len(result) == 1
+        assert result[0].text == text
+
+    def test_en_dash_parenthetical_not_split(self) -> None:
+        splitter = SparseRegexSentenceSplitter(anchor_every_words=24)
+        text = "The campus \u2013 its second-largest \u2013 opened last year."
+        result = splitter.split(text)
+        assert len(result) == 1
+        assert result[0].text == text
+
+    def test_lamborghini_amazon_regression(self) -> None:
+        """Regression: closing curly quote after period must split sentences."""
+        splitter = SparseRegexSentenceSplitter(anchor_every_words=5)
+        text = (
+            "Lambo demand is \u201cclose to zero.\u201d "
+            "Amazon opened a 1.1M\u2011square\u2011foot campus in north Bengaluru "
+            "\u2014 its second-largest office in Asia \u2014 "
+            "designed to house more than 7K employees."
+        )
+        result = splitter.split(text)
+        # Must split at the sentence boundary after the closing curly quote
+        assert len(result) >= 2
+        assert result[0].text == 'Lambo demand is \u201cclose to zero.\u201d'
+        # The Amazon sentence must NOT be split at the em-dashes
+        amazon_text = " ".join(s.text for s in result[1:])
+        assert "\u2014" in amazon_text

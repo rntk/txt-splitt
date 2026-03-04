@@ -8,13 +8,27 @@ from html.parser import HTMLParser
 
 from txt_splitt.types import Sentence
 
+# Uppercase letter class for sentence boundary lookahead:
+# - A-Z: Basic Latin capitals
+# - À-Ö, Ø-Þ: Latin Extended capitals (accented, e.g. À É Ñ Ü)
+# - А-ЯЁ: Cyrillic capitals (including Ё)
+_UPPER = r"A-ZÀ-ÖØ-ÞА-ЯЁ"
+
+# Closing characters that may follow sentence-ending punctuation before whitespace:
+# straight/curly quotes, closing parens/brackets, guillemet
+_CLOSING = r"\"'\u201D\u2019)\]\u00BB"
+
+# Core sentence boundary fragment:
+# matches [.!?…] optionally followed by a closing char, then whitespace, then uppercase
+_SENT_BOUNDARY = rf"(?:(?<=[.!?\u2026])|(?<=[.!?\u2026][{_CLOSING}]))\s+(?=[{_UPPER}])"
+
 # Compiled regex for sentence boundaries:
-# - Punctuation ([.!?]) followed by whitespace and uppercase letter (including Cyrillic)
+# - Punctuation ([.!?…]) + optional closing char + whitespace + uppercase
 # - One or more newlines
-_SENTENCE_BOUNDARY_PATTERN = re.compile(r"((?<=[.!?])\s+(?=[A-ZА-Я]))|(\n+)")
-_DENSE_BOUNDARY_PATTERN = re.compile(r"((?<=[.!?])\s+(?=[A-ZА-Я]))|(\n+)|(\s+[·•|]\s+)")
+_SENTENCE_BOUNDARY_PATTERN = re.compile(rf"({_SENT_BOUNDARY})|(\n+)")
+_DENSE_BOUNDARY_PATTERN = re.compile(rf"({_SENT_BOUNDARY})|(\n+)|(\s+[·•|]\s+)")
 _SPARSE_BOUNDARY_PATTERN = re.compile(
-    r"((?<=[.!?])\s+(?=[A-ZА-Я]))|((?<=[;:])\s+)|(\n+)|(\s+[·•|]\s+)|(\s+[—–]\s+)"
+    rf"({_SENT_BOUNDARY})|((?<=[;:])\s+)|(\n+)|(\s+[·•|]\s+)"
 )
 _WORD_PATTERN = re.compile(r"\S+")
 _HTML_TAG_PATTERN = re.compile(r"<(?:[^>\"']|\"[^\"]*\"|'[^']*')*>")
