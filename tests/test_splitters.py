@@ -572,6 +572,62 @@ class TestHtmlAwareSentenceSplitter:
             assert text[s.start : s.end] == s.text
 
 
+class TestLowSignalCleanupAcrossSplitters:
+    def _splitters(
+        self,
+    ) -> list[
+        RegexSentenceSplitter
+        | DenseRegexSentenceSplitter
+        | SparseRegexSentenceSplitter
+        | HtmlAwareSentenceSplitter
+    ]:
+        return [
+            RegexSentenceSplitter(),
+            DenseRegexSentenceSplitter(anchor_every_words=24),
+            SparseRegexSentenceSplitter(anchor_every_words=24),
+            HtmlAwareSentenceSplitter(
+                anchor_every_words=24,
+                block_tags_as_boundaries=False,
+            ),
+        ]
+
+    def test_bridge_token_not_emitted_as_standalone_sentence(self) -> None:
+        text = "By\nNathan Bomey\n·\nFeb 09, 2026"
+        for splitter in self._splitters():
+            rows = [s.text.strip() for s in splitter.split(text)]
+            assert "·" not in rows
+
+    def test_ordinal_marker_merged_with_following_heading(self) -> None:
+        text = "Intro\n\n2.\nStripe talking $140B valuation"
+        for splitter in self._splitters():
+            rows = [s.text.strip() for s in splitter.split(text)]
+            assert "2." not in rows
+            assert any(
+                row.startswith("2.") and "Stripe talking $140B valuation" in row
+                for row in rows
+            )
+
+    def test_nbsp_entity_not_standalone_sentence(self) -> None:
+        text = "Alpha\n&nbsp;\nBeta"
+        for splitter in self._splitters():
+            rows = [s.text.strip() for s in splitter.split(text)]
+            assert "&nbsp;" not in rows
+
+
+class TestSparseEntitySemicolonBoundary:
+    def test_html_entity_semicolon_does_not_split_sentence(self) -> None:
+        splitter = SparseRegexSentenceSplitter(anchor_every_words=24)
+        text = (
+            "mass-marketed by companies, including Hims &amp; Hers. "
+            "Driving the news: None of those actions were enough."
+        )
+        result = splitter.split(text)
+        rows = [s.text for s in result]
+        assert "&amp;" not in [row.strip() for row in rows]
+        assert rows[0] == "mass-marketed by companies, including Hims &amp; Hers."
+        assert rows[1] == "Driving the news:"
+
+
 class TestClosingQuoteBoundary:
     """Closing quotes after sentence-ending punctuation must not block splits."""
 
@@ -585,10 +641,10 @@ class TestClosingQuoteBoundary:
 
     def test_curly_closing_quote_sparse_splitter(self) -> None:
         splitter = SparseRegexSentenceSplitter(anchor_every_words=24)
-        text = 'Lambo demand is \u201cclose to zero.\u201d Amazon opened a campus.'
+        text = "Lambo demand is \u201cclose to zero.\u201d Amazon opened a campus."
         result = splitter.split(text)
         assert len(result) == 2
-        assert result[0].text == 'Lambo demand is \u201cclose to zero.\u201d'
+        assert result[0].text == "Lambo demand is \u201cclose to zero.\u201d"
         assert result[1].text == "Amazon opened a campus."
 
     def test_curly_closing_quote_dense_splitter(self) -> None:
@@ -657,7 +713,7 @@ class TestEmDashNotSplitting:
         result = splitter.split(text)
         # Must split at the sentence boundary after the closing curly quote
         assert len(result) >= 2
-        assert result[0].text == 'Lambo demand is \u201cclose to zero.\u201d'
+        assert result[0].text == "Lambo demand is \u201cclose to zero.\u201d"
         # The Amazon sentence must NOT be split at the em-dashes
         amazon_text = " ".join(s.text for s in result[1:])
         assert "\u2014" in amazon_text

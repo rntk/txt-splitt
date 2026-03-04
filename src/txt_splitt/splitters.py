@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import bisect
+import html
 import re
+import unicodedata
 from html.parser import HTMLParser
 
 from txt_splitt.types import Sentence
@@ -32,6 +34,22 @@ _SPARSE_BOUNDARY_PATTERN = re.compile(
 )
 _WORD_PATTERN = re.compile(r"\S+")
 _HTML_TAG_PATTERN = re.compile(r"<(?:[^>\"']|\"[^\"]*\"|'[^']*')*>")
+_HTML_ENTITY_PATTERN = re.compile(
+    r"&(?:#[0-9]+|#x[0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]{1,31});"
+)
+_LIST_MARKER_PATTERN = re.compile(
+    r"(?:\d{1,3}|[a-zA-Z]|[ivxIVX]{1,5})[.)]"
+)
+_BRIDGE_PATTERN = re.compile(r"[^\w\s\d\.!\?\u2026]{1,5}")
+_HORIZONTAL_WS_PATTERN = re.compile(r"[ \t\xa0\u2000-\u200a\u202f\u205f\u3000]+")
+_EXCESS_NEWLINES_PATTERN = re.compile(r"\n{3,}")
+_INVISIBLE_CATEGORIES: frozenset[str] = frozenset(
+    {"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"}
+)
+_SIGNAL_KIND_CONTENT = "content"
+_SIGNAL_KIND_BLANK = "blank"
+_SIGNAL_KIND_BRIDGE = "bridge"
+_SIGNAL_KIND_LIST_MARKER = "list_marker"
 
 
 class RegexSentenceSplitter:
@@ -47,39 +65,8 @@ class RegexSentenceSplitter:
             return []
 
         boundaries = list(_SENTENCE_BOUNDARY_PATTERN.finditer(text))
-
-        result: list[Sentence] = []
-        start = 0
-        index = 0
-
-        for match in boundaries:
-            end = match.start()
-            s_start, s_end = _trim_whitespace(text, start, end)
-            if s_start < s_end:
-                result.append(
-                    Sentence(
-                        index=index,
-                        start=s_start,
-                        end=s_end,
-                        text=text[s_start:s_end],
-                    )
-                )
-                index += 1
-            start = match.end()
-
-        # Handle the last segment
-        s_start, s_end = _trim_whitespace(text, start, len(text))
-        if s_start < s_end:
-            result.append(
-                Sentence(
-                    index=index,
-                    start=s_start,
-                    end=s_end,
-                    text=text[s_start:s_end],
-                )
-            )
-
-        return result
+        cleaned_spans = _split_and_cleanup_spans(text, boundaries)
+        return _spans_to_sentences(text, cleaned_spans)
 
 
 class DenseRegexSentenceSplitter:
@@ -111,9 +98,7 @@ class DenseRegexSentenceSplitter:
 
         boundaries = list(_DENSE_BOUNDARY_PATTERN.finditer(text))
 
-        spans: list[tuple[int, int]] = []
-        start = 0
-
+        valid_boundaries: list[tuple[int, int]] = []
         for match in boundaries:
             if self._html_aware and _boundary_overlaps_tag(
                 match.start(),
@@ -122,16 +107,9 @@ class DenseRegexSentenceSplitter:
                 tag_ends,
             ):
                 continue
-            end = match.start()
-            s_start, s_end = _trim_whitespace(text, start, end)
-            if s_start < s_end:
-                spans.append((s_start, s_end))
-            start = match.end()
+            valid_boundaries.append(match.span())
 
-        # Handle the last segment
-        s_start, s_end = _trim_whitespace(text, start, len(text))
-        if s_start < s_end:
-            spans.append((s_start, s_end))
+        spans = _split_and_cleanup_spans(text, valid_boundaries)
 
         anchored_spans: list[tuple[int, int]] = []
         for span_start, span_end in spans:
@@ -156,18 +134,8 @@ class DenseRegexSentenceSplitter:
                     )
                 )
 
-        result: list[Sentence] = []
-        for index, (seg_start, seg_end) in enumerate(anchored_spans):
-            result.append(
-                Sentence(
-                    index=index,
-                    start=seg_start,
-                    end=seg_end,
-                    text=text[seg_start:seg_end],
-                )
-            )
-
-        return result
+        anchored_spans = _cleanup_low_signal_spans(text, anchored_spans)
+        return _spans_to_sentences(text, anchored_spans)
 
 
 class SparseRegexSentenceSplitter:
@@ -211,10 +179,10 @@ class SparseRegexSentenceSplitter:
 
         boundaries = list(_SPARSE_BOUNDARY_PATTERN.finditer(text))
 
-        spans: list[tuple[int, int]] = []
-        start = 0
-
+        valid_boundaries: list[tuple[int, int]] = []
         for match in boundaries:
+            if _should_skip_sparse_boundary(text, match):
+                continue
             if self._html_aware and _boundary_overlaps_tag(
                 match.start(),
                 match.end(),
@@ -222,15 +190,9 @@ class SparseRegexSentenceSplitter:
                 tag_ends,
             ):
                 continue
-            end = match.start()
-            s_start, s_end = _trim_whitespace(text, start, end)
-            if s_start < s_end:
-                spans.append((s_start, s_end))
-            start = match.end()
+            valid_boundaries.append(match.span())
 
-        s_start, s_end = _trim_whitespace(text, start, len(text))
-        if s_start < s_end:
-            spans.append((s_start, s_end))
+        spans = _split_and_cleanup_spans(text, valid_boundaries)
 
         split_spans: list[tuple[int, int]] = []
         for span_start, span_end in spans:
@@ -257,18 +219,8 @@ class SparseRegexSentenceSplitter:
                     )
                 )
 
-        result: list[Sentence] = []
-        for index, (seg_start, seg_end) in enumerate(split_spans):
-            result.append(
-                Sentence(
-                    index=index,
-                    start=seg_start,
-                    end=seg_end,
-                    text=text[seg_start:seg_end],
-                )
-            )
-
-        return result
+        split_spans = _cleanup_low_signal_spans(text, split_spans)
+        return _spans_to_sentences(text, split_spans)
 
 
 def _trim_whitespace(text: str, start: int, end: int) -> tuple[int, int]:
@@ -278,6 +230,159 @@ def _trim_whitespace(text: str, start: int, end: int) -> tuple[int, int]:
     while end > start and text[end - 1].isspace():
         end -= 1
     return start, end
+
+
+def _normalize_for_signal(text: str) -> str:
+    """Normalize text for low-signal detection without altering source spans."""
+    decoded = html.unescape(html.unescape(text))
+    # Filter out characters in invisible/control unicode categories
+    no_invisible = "".join(
+        ch
+        for ch in decoded
+        if unicodedata.category(ch) not in _INVISIBLE_CATEGORIES
+    )
+    collapsed = _HORIZONTAL_WS_PATTERN.sub(" ", no_invisible)
+    collapsed = _EXCESS_NEWLINES_PATTERN.sub("\n\n", collapsed)
+    return collapsed.strip()
+
+
+def _has_letter_or_number(text: str) -> bool:
+    """Return True if normalized text contains any alphanumeric character."""
+    return any(ch.isalnum() for ch in text)
+
+
+def _span_signal_kind(span_text: str) -> str:
+    """Classify span text into content/blank/bridge/list_marker."""
+    normalized = _normalize_for_signal(span_text)
+    if not normalized:
+        return _SIGNAL_KIND_BLANK
+    if _LIST_MARKER_PATTERN.fullmatch(normalized):
+        return _SIGNAL_KIND_LIST_MARKER
+    if _BRIDGE_PATTERN.fullmatch(normalized):
+        return _SIGNAL_KIND_BRIDGE
+    if not _has_letter_or_number(normalized):
+        return _SIGNAL_KIND_BLANK
+    return _SIGNAL_KIND_CONTENT
+
+
+def _is_soft_gap(gap_text: str) -> bool:
+    """Return True when a boundary gap is only whitespace/entity noise."""
+    return _normalize_for_signal(gap_text) == ""
+
+
+def _attach_to_next(gap_before: str, gap_after: str) -> bool:
+    """Choose merge direction for low-signal spans using boundary softness."""
+    soft_before = _is_soft_gap(gap_before)
+    soft_after = _is_soft_gap(gap_after)
+    if soft_after and not soft_before:
+        return True
+    if soft_before and not soft_after:
+        return False
+    return False
+
+
+def _should_skip_sparse_boundary(text: str, match: re.Match[str]) -> bool:
+    """Ignore sparse semicolon boundary when semicolon closes an HTML entity."""
+    semicolon_or_colon_group = match.group(2)
+    if semicolon_or_colon_group is None:
+        return False
+    boundary_start = match.start()
+    if boundary_start <= 0 or text[boundary_start - 1] != ";":
+        return False
+
+    token_start = boundary_start - 1
+    while token_start > 0 and not text[token_start - 1].isspace():
+        token_start -= 1
+    token = text[token_start:boundary_start]
+    return _HTML_ENTITY_PATTERN.fullmatch(token) is not None
+
+
+def _split_and_cleanup_spans(
+    text: str,
+    boundaries: list[re.Match[str]] | list[tuple[int, int]],
+) -> list[tuple[int, int]]:
+    """Split text into spans at boundaries and apply low-signal cleanup."""
+    spans: list[tuple[int, int]] = []
+    start = 0
+    for b in boundaries:
+        b_start, b_end = b.span() if isinstance(b, re.Match) else b
+        s_start, s_end = _trim_whitespace(text, start, b_start)
+        if s_start < s_end:
+            spans.append((s_start, s_end))
+        start = b_end
+
+    s_start, s_end = _trim_whitespace(text, start, len(text))
+    if s_start < s_end:
+        spans.append((s_start, s_end))
+
+    return _cleanup_low_signal_spans(text, spans)
+
+
+def _cleanup_low_signal_spans(
+    text: str, spans: list[tuple[int, int]]
+) -> list[tuple[int, int]]:
+    """Merge low-signal spans into neighboring content spans.
+
+    This prevents marker-only rows like ``·``, ``&amp;`` and ordinal bullets.
+    """
+    if not spans:
+        return []
+
+    mutable_spans = [[start, end] for start, end in spans]
+    cleaned: list[list[int]] = []
+    index = 0
+
+    while index < len(mutable_spans):
+        start, end = mutable_spans[index]
+        kind = _span_signal_kind(text[start:end])
+        has_prev = bool(cleaned)
+        has_next = index + 1 < len(mutable_spans)
+
+        if kind == _SIGNAL_KIND_CONTENT:
+            cleaned.append([start, end])
+            index += 1
+            continue
+
+        prev_end = cleaned[-1][1] if has_prev else start
+        next_start = mutable_spans[index + 1][0] if has_next else end
+        gap_before = text[prev_end:start] if has_prev else ""
+        gap_after = text[end:next_start] if has_next else ""
+
+        if kind == _SIGNAL_KIND_LIST_MARKER and has_next:
+            mutable_spans[index + 1][0] = start
+            index += 1
+            continue
+
+        if kind == _SIGNAL_KIND_BRIDGE and has_prev and has_next:
+            next_span_start, next_span_end = mutable_spans[index + 1]
+            next_kind = _span_signal_kind(text[next_span_start:next_span_end])
+            if (
+                next_kind == _SIGNAL_KIND_CONTENT
+                and _is_soft_gap(gap_before)
+                and _is_soft_gap(gap_after)
+            ):
+                cleaned[-1][1] = next_span_end
+                index += 2
+                continue
+
+        if has_next and (not has_prev or _attach_to_next(gap_before, gap_after)):
+            mutable_spans[index + 1][0] = start
+        elif has_prev:
+            cleaned[-1][1] = end
+        else:
+            cleaned.append([start, end])
+
+        index += 1
+
+    return [(start, end) for start, end in cleaned if start < end]
+
+
+def _spans_to_sentences(text: str, spans: list[tuple[int, int]]) -> list[Sentence]:
+    """Build sentence objects from spans using exact source slices."""
+    return [
+        Sentence(index=index, start=start, end=end, text=text[start:end])
+        for index, (start, end) in enumerate(spans)
+    ]
 
 
 def _split_span_by_word_anchor(
@@ -713,18 +818,7 @@ class HtmlAwareSentenceSplitter:
             all_boundaries = valid_boundaries
 
         # Step 5: Split text into spans using merged boundaries
-        spans: list[tuple[int, int]] = []
-        start = 0
-        for b_start, b_end in all_boundaries:
-            s_start, s_end = _trim_whitespace(text, start, b_start)
-            if s_start < s_end:
-                spans.append((s_start, s_end))
-            start = b_end
-
-        # Final segment
-        s_start, s_end = _trim_whitespace(text, start, len(text))
-        if s_start < s_end:
-            spans.append((s_start, s_end))
+        spans = _split_and_cleanup_spans(text, all_boundaries)
 
         # Step 6: Apply word-count anchors within each span
         anchored_spans: list[tuple[int, int]] = []
@@ -740,16 +834,6 @@ class HtmlAwareSentenceSplitter:
                 )
             )
 
+        anchored_spans = _cleanup_low_signal_spans(text, anchored_spans)
         # Step 7: Build Sentence objects
-        result: list[Sentence] = []
-        for index, (seg_start, seg_end) in enumerate(anchored_spans):
-            result.append(
-                Sentence(
-                    index=index,
-                    start=seg_start,
-                    end=seg_end,
-                    text=text[seg_start:seg_end],
-                )
-            )
-
-        return result
+        return _spans_to_sentences(text, anchored_spans)
