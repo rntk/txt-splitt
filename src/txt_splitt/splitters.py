@@ -40,7 +40,7 @@ _HTML_ENTITY_PATTERN = re.compile(
 _LIST_MARKER_PATTERN = re.compile(
     r"(?:\d{1,3}|[a-zA-Z]|[ivxIVX]{1,5})[.)]"
 )
-_BRIDGE_PATTERN = re.compile(r"[^\w\s\d\.!\?\u2026]{1,5}")
+_BRIDGE_PATTERN = re.compile(r"[^\w\s\.!\?\u2026]{1,5}")
 _HORIZONTAL_WS_PATTERN = re.compile(r"[ \t\xa0\u2000-\u200a\u202f\u205f\u3000]+")
 _EXCESS_NEWLINES_PATTERN = re.compile(r"\n{3,}")
 _INVISIBLE_CATEGORIES: frozenset[str] = frozenset(
@@ -349,6 +349,8 @@ def _cleanup_low_signal_spans(
         gap_after = text[end:next_start] if has_next else ""
 
         if kind == _SIGNAL_KIND_LIST_MARKER and has_next:
+            # Prepend the marker to the next span. If the next span is also
+            # low-signal, the marker will chain forward through the while loop.
             mutable_spans[index + 1][0] = start
             index += 1
             continue

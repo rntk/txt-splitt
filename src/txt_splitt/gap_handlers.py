@@ -288,6 +288,9 @@ class LLMRepairingGapHandler:
             ) as gap_span:
                 # If both sides already resolve to the same owner, fill directly.
                 # This avoids unnecessary LLM calls for omitted middle indices.
+                # NOTE: This check is intentionally redundant with a similar check
+                # inside _resolve_gap_sentence_owner to ensure the fast path is
+                # taken at the gap level before iterating over sentences.
                 if (
                     prev_owner is not None
                     and next_owner is not None
@@ -483,6 +486,8 @@ def _gather_context(
             break
         idx += direction
 
+    # If all sentences for this neighbor are trash, context will be empty.
+    # This is handled fine by the downstream prompt builder.
     if direction < 0:
         context.reverse()
     return context
