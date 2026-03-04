@@ -18,6 +18,22 @@ def _make_sentences(n: int) -> list[Sentence]:
 
 
 class TestLLMRepairingGapHandler:
+    def test_gap_between_same_neighbor_owner_skips_llm(self) -> None:
+        client = MagicMock()
+        handler = LLMRepairingGapHandler(client)
+
+        groups = [
+            SentenceGroup(
+                label=("A",),
+                ranges=(SentenceRange(0, 0), SentenceRange(2, 2)),
+            ),
+        ]
+        result = handler.handle(groups, sentence_count=3, sentences=_make_sentences(3))
+
+        assert len(result) == 1
+        assert result[0].ranges == (SentenceRange(0, 2),)
+        client.call.assert_not_called()
+
     def test_html_entity_invisible_gap_sentence_skips_llm(self) -> None:
         client = MagicMock()
         handler = LLMRepairingGapHandler(client)
@@ -37,6 +53,31 @@ class TestLLMRepairingGapHandler:
         assert result[0].ranges == (SentenceRange(0, 1),)
         assert result[1].ranges == (SentenceRange(2, 2),)
         client.call.assert_not_called()
+
+    def test_gap_context_omits_trash_sentences(self) -> None:
+        client = MagicMock()
+        client.call.return_value = "PREVIOUS"
+        handler = LLMRepairingGapHandler(client)
+
+        groups = [
+            SentenceGroup(label=("A",), ranges=(SentenceRange(0, 1),)),
+            SentenceGroup(label=("B",), ranges=(SentenceRange(3, 4),)),
+        ]
+        sentences = [
+            Sentence(index=0, start=0, end=8, text="Meaningful previous context."),
+            Sentence(index=1, start=10, end=18, text="&nbsp;"),
+            Sentence(index=2, start=20, end=28, text="Gap sentence."),
+            Sentence(index=3, start=30, end=38, text="&nbsp;"),
+            Sentence(index=4, start=40, end=48, text="Meaningful next context."),
+        ]
+
+        handler.handle(groups, sentence_count=5, sentences=sentences)
+
+        client.call.assert_called_once()
+        prompt = client.call.call_args.args[0]
+        assert "&nbsp;" not in prompt
+        assert "Meaningful previous context." in prompt
+        assert "Meaningful next context." in prompt
 
     def test_gap_sentence_assigned_to_previous(self) -> None:
         client = MagicMock()
