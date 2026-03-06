@@ -9,7 +9,7 @@ from txt_splitt.normalizers import (
     _reindex,
     _split_long,
 )
-from txt_splitt.splitters import RegexSentenceSplitter
+from txt_splitt.splitters import SparseRegexSentenceSplitter
 from txt_splitt.types import Sentence
 
 # ---------------------------------------------------------------------------
@@ -45,11 +45,15 @@ def _assert_sequential_indices(sentences: list[Sentence]) -> None:
 class TestNormalizingSplitterInit:
     def test_max_must_exceed_min(self) -> None:
         with pytest.raises(ValueError, match="max_length.*must be greater"):
-            NormalizingSplitter(RegexSentenceSplitter(), min_length=100, max_length=50)
+            NormalizingSplitter(
+                SparseRegexSentenceSplitter(), min_length=100, max_length=50
+            )
 
     def test_equal_lengths_rejected(self) -> None:
         with pytest.raises(ValueError):
-            NormalizingSplitter(RegexSentenceSplitter(), min_length=100, max_length=100)
+            NormalizingSplitter(
+                SparseRegexSentenceSplitter(), min_length=100, max_length=100
+            )
 
 
 # ===================================================================
@@ -75,7 +79,7 @@ class TestMergeShort:
             "This is a normal length sentence here. "
             "OK. Another normal sentence follows."
         )
-        sents = RegexSentenceSplitter().split(text)
+        sents = SparseRegexSentenceSplitter().split(text)
         result = _merge_short(sents, text, min_length=20)
         # "OK." is short → merges with previous
         assert len(result) == 2
@@ -84,7 +88,7 @@ class TestMergeShort:
 
     def test_first_sentence_short_merges_forward(self) -> None:
         text = "Hi. This is a much longer second sentence here."
-        sents = RegexSentenceSplitter().split(text)
+        sents = SparseRegexSentenceSplitter().split(text)
         result = _merge_short(sents, text, min_length=20)
         assert len(result) == 1
         assert result[0].text == text
@@ -92,7 +96,7 @@ class TestMergeShort:
 
     def test_multiple_short_sentences_merge(self) -> None:
         text = "A. B. C. This is a longer sentence for testing."
-        sents = RegexSentenceSplitter().split(text)
+        sents = SparseRegexSentenceSplitter().split(text)
         result = _merge_short(sents, text, min_length=20)
         # All short ones should merge; at most 2 results
         assert len(result) <= 2
@@ -107,7 +111,7 @@ class TestMergeShort:
 
     def test_all_short_merge_into_one(self) -> None:
         text = "A. B. C."
-        sents = RegexSentenceSplitter().split(text)
+        sents = SparseRegexSentenceSplitter().split(text)
         result = _merge_short(sents, text, min_length=20)
         # First is short -> pending. Merges with second.
         # Result still short -> merges with third.
@@ -124,7 +128,7 @@ class TestMergeShort:
         # Ensure merged text is sliced from original,
         # including inter-sentence whitespace.
         text = "Yes.\n\nThis is the next paragraph with enough length."
-        sents = RegexSentenceSplitter().split(text)
+        sents = SparseRegexSentenceSplitter().split(text)
         assert len(sents) == 2
         result = _merge_short(sents, text, min_length=20)
         assert len(result) == 1
@@ -259,7 +263,7 @@ class TestReindex:
 class TestNormalizingSplitterIntegration:
     def setup_method(self) -> None:
         self.splitter = NormalizingSplitter(
-            RegexSentenceSplitter(), min_length=20, max_length=100
+            SparseRegexSentenceSplitter(), min_length=20, max_length=100
         )
 
     def test_normal_text_unchanged(self) -> None:
@@ -292,7 +296,7 @@ class TestNormalizingSplitterIntegration:
     def test_protocol_compatible(self) -> None:
         """NormalizingSplitter satisfies SentenceSplitter protocol."""
 
-        splitter = NormalizingSplitter(RegexSentenceSplitter())
+        splitter = NormalizingSplitter(SparseRegexSentenceSplitter())
         # Structural typing — just verify the method exists and works
         assert hasattr(splitter, "split")
         result = splitter.split("Hello world. This is a test.")
@@ -309,7 +313,7 @@ class TestNormalizingSplitterIntegration:
             "End."
         )
         splitter = NormalizingSplitter(
-            RegexSentenceSplitter(), min_length=10, max_length=80
+            SparseRegexSentenceSplitter(), min_length=10, max_length=80
         )
         result = splitter.split(text)
         _assert_offsets(result, text)
@@ -317,7 +321,7 @@ class TestNormalizingSplitterIntegration:
 
     def test_disabled_normalization(self) -> None:
         """With extreme params, output matches inner splitter."""
-        inner = RegexSentenceSplitter()
+        inner = SparseRegexSentenceSplitter()
         wrapper = NormalizingSplitter(inner, min_length=1, max_length=999999)
         text = "Hello world. This is a test. Another one."
         raw = inner.split(text)

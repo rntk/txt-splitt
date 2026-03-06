@@ -335,14 +335,14 @@ class TestPipeline:
         from txt_splitt.gap_handlers import StrictGapHandler
         from txt_splitt.markers import BracketMarker
         from txt_splitt.parsers import TopicRangeParser
-        from txt_splitt.splitters import RegexSentenceSplitter
+        from txt_splitt.splitters import SparseRegexSentenceSplitter
 
         text = "AI is growing fast. Climate change is real."
 
         llm_response = "Technology>AI: 0\nScience>Climate: 1"
 
         pipeline = Pipeline(
-            splitter=RegexSentenceSplitter(),
+            splitter=SparseRegexSentenceSplitter(),
             marker=BracketMarker(),
             llm=StubLLM(llm_response),
             parser=TopicRangeParser(),
@@ -777,12 +777,12 @@ class TestTwoStagePipeline:
         from txt_splitt.gap_handlers import StrictGapHandler
         from txt_splitt.markers import BracketMarker
         from txt_splitt.parsers import TopicRangeParser
-        from txt_splitt.splitters import RegexSentenceSplitter
+        from txt_splitt.splitters import SparseRegexSentenceSplitter
 
         text = "AI is growing fast. Climate change is real."
 
         pipeline = Pipeline(
-            splitter=RegexSentenceSplitter(),
+            splitter=SparseRegexSentenceSplitter(),
             marker=BracketMarker(),
             topic_extractor=StubTopicExtractor(["Technology>AI", "Science>Climate"]),
             range_assigner=StubRangeAssigner("Technology>AI: 0\nScience>Climate: 1"),
@@ -912,14 +912,14 @@ class TestPipelineHtmlCleaning:
         from txt_splitt.markers import BracketMarker
         from txt_splitt.offset_restorers import MappingOffsetRestorer
         from txt_splitt.parsers import TopicRangeParser
-        from txt_splitt.splitters import RegexSentenceSplitter
+        from txt_splitt.splitters import SparseRegexSentenceSplitter
 
         original = "<p>AI is growing fast.</p> <p>Climate change is real.</p>"
 
         llm_response = "Technology>AI: 0\nScience>Climate: 1"
 
         pipeline = Pipeline(
-            splitter=RegexSentenceSplitter(),
+            splitter=SparseRegexSentenceSplitter(),
             marker=BracketMarker(),
             llm=StubLLM(llm_response),
             parser=TopicRangeParser(),

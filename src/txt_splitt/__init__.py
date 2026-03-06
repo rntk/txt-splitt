@@ -59,12 +59,7 @@ from txt_splitt.protocols import (
     TopicExtractor,
 )
 from txt_splitt.retry import RetryingLLMCallable
-from txt_splitt.splitters import (
-    DenseRegexSentenceSplitter,
-    HtmlAwareSentenceSplitter,
-    RegexSentenceSplitter,
-    SparseRegexSentenceSplitter,
-)
+from txt_splitt.splitters import SparseRegexSentenceSplitter
 from txt_splitt.text_optimizers import (
     OptimizingMarker,
     is_content_free,
@@ -147,9 +142,6 @@ __all__ = [
     "HTMLParserTagStripCleaner",
     "TagStripCleaner",
     "AdjacentSameTopicJoiner",
-    "DenseRegexSentenceSplitter",
-    "HtmlAwareSentenceSplitter",
-    "RegexSentenceSplitter",
     "SparseRegexSentenceSplitter",
     "ShortSentenceEnhancer",
     "LLMRepairingGapHandler",
