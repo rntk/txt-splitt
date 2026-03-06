@@ -18,14 +18,14 @@ class TestSparseRegexSentenceSplitter:
     def test_whitespace_only(self) -> None:
         assert self.splitter.split("   ") == []
 
-    def test_splits_on_natural_punctuation_boundaries(self) -> None:
+    def test_splits_on_high_confidence_boundaries(self) -> None:
         text = "Lead: details here; then more. Finally done."
         result = self.splitter.split(text)
-        assert len(result) == 4
-        assert result[0] == Sentence(index=0, start=0, end=5, text="Lead:")
-        assert result[1].text == "details here;"
-        assert result[2].text == "then more."
-        assert result[3].text == "Finally done."
+        assert len(result) == 2
+        assert result[0] == Sentence(
+            index=0, start=0, end=30, text="Lead: details here; then more."
+        )
+        assert result[1].text == "Finally done."
 
     def test_does_not_anchor_short_sentences(self) -> None:
         text = "one two three four five six seven eight nine ten"
@@ -39,10 +39,12 @@ class TestSparseRegexSentenceSplitter:
             "eleven twelve thirteen fourteen"
         )
         result = self.splitter.split(text)
-        assert len(result) == 3
+        assert len(result) == 2
         assert result[0].text == "one two three four five"
-        assert result[1].text == "six seven eight nine ten"
-        assert result[2].text == "eleven twelve thirteen fourteen"
+        assert (
+            result[1].text
+            == "six seven eight nine ten eleven twelve thirteen fourteen"
+        )
 
     def test_char_offsets_allow_slicing(self) -> None:
         text = "A: one two three four five six seven eight nine ten eleven twelve"
@@ -64,9 +66,27 @@ class TestSparseRegexSentenceSplitter:
             SparseRegexSentenceSplitter(
                 anchor_every_words=10, long_sentence_word_threshold=5
             )
+        with pytest.raises(ValueError, match="min_sentence_words must be positive"):
+            SparseRegexSentenceSplitter(min_sentence_words=0)
 
 
 class TestSparseRegexSentenceSplitterHtmlAware:
+    def test_matches_plain_mode_when_text_has_no_html(self) -> None:
+        plain = SparseRegexSentenceSplitter(
+            anchor_every_words=3, long_sentence_word_threshold=6
+        )
+        html_aware = SparseRegexSentenceSplitter(
+            anchor_every_words=3, long_sentence_word_threshold=6, html_aware=True
+        )
+        text = "Alpha beta gamma delta epsilon zeta eta theta iota"
+
+        plain_result = plain.split(text)
+        html_result = html_aware.split(text)
+
+        assert [sentence.text for sentence in plain_result] == [
+            sentence.text for sentence in html_result
+        ]
+
     def test_avoids_splitting_on_punctuation_inside_html_tag(self) -> None:
         splitter = SparseRegexSentenceSplitter(
             anchor_every_words=5, long_sentence_word_threshold=10, html_aware=True
@@ -86,9 +106,21 @@ class TestSparseRegexSentenceSplitterHtmlAware:
         )
         text = 'w1 w2 w3 <span title="x: y; z."> w4 w5 w6 w7 w8'
         result = splitter.split(text)
-        assert len(result) == 3
+        assert len(result) == 2
         for s in result:
             assert text[s.start : s.end] == s.text
+
+    def test_html_aware_anchor_spans_preserve_exact_source_slices(self) -> None:
+        splitter = SparseRegexSentenceSplitter(
+            anchor_every_words=2, long_sentence_word_threshold=3, html_aware=True
+        )
+        text = '<p>w1 w2 <span title="ignore."> w3 w4 w5</span> w6</p>'
+
+        result = splitter.split(text)
+
+        assert len(result) >= 2
+        for sentence in result:
+            assert text[sentence.start : sentence.end] == sentence.text
 
 
 class TestLowSignalCleanup:
@@ -114,6 +146,47 @@ class TestLowSignalCleanup:
         rows = [s.text.strip() for s in self._splitter().split(text)]
         assert "&nbsp;" not in rows
 
+    def test_list_marker_does_not_back_attach_to_previous_content(self) -> None:
+        text = "Alpha\n\n2.\n&nbsp;\nBeta"
+        rows = [s.text.strip() for s in self._splitter().split(text)]
+        assert rows == ["Alpha", "2.\n&nbsp;\nBeta"]
+
+    def test_list_marker_with_bridge_does_not_back_attach(self) -> None:
+        text = "Alpha\n\n2.\n·"
+        rows = [s.text.strip() for s in self._splitter().split(text)]
+        assert rows == ["Alpha", "2.\n·"]
+
+
+class TestSoftBoundarySizing:
+    def test_semicolon_and_colon_split_only_when_span_is_long(self) -> None:
+        splitter = SparseRegexSentenceSplitter(
+            anchor_every_words=6,
+            long_sentence_word_threshold=10,
+            min_sentence_words=3,
+        )
+        text = (
+            "Overview: alpha beta gamma delta epsilon zeta; "
+            "eta theta iota kappa lambda mu."
+        )
+        rows = [s.text for s in splitter.split(text)]
+        assert rows == [
+            "Overview: alpha beta gamma delta epsilon zeta;",
+            "eta theta iota kappa lambda mu.",
+        ]
+
+    def test_single_newline_is_soft_boundary(self) -> None:
+        splitter = SparseRegexSentenceSplitter(
+            anchor_every_words=5,
+            long_sentence_word_threshold=8,
+            min_sentence_words=3,
+        )
+        text = "alpha beta gamma delta\nepsilon zeta eta theta iota kappa lambda"
+        rows = [s.text for s in splitter.split(text)]
+        assert rows == [
+            "alpha beta gamma delta",
+            "epsilon zeta eta theta iota kappa lambda",
+        ]
+
 
 class TestSparseEntitySemicolonBoundary:
     def test_html_entity_semicolon_does_not_split_sentence(self) -> None:
@@ -126,7 +199,7 @@ class TestSparseEntitySemicolonBoundary:
         rows = [s.text for s in result]
         assert "&amp;" not in [row.strip() for row in rows]
         assert rows[0] == "mass-marketed by companies, including Hims &amp; Hers."
-        assert rows[1] == "Driving the news:"
+        assert rows[1] == "Driving the news: None of those actions were enough."
 
 
 class TestClosingQuoteBoundary:

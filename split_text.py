@@ -16,6 +16,7 @@ sys.path.append(str(Path(__file__).parent / "src"))
 from txt_splitt import (
     AdjacentSameTopicJoiner,
     BracketMarker,
+    HTMLParserTagStripCleaner,
     LLMCallable,
     LLMRepairingGapHandler,
     MappingOffsetRestorer,
@@ -24,7 +25,6 @@ from txt_splitt import (
     Pipeline,
     RetryingLLMCallable,
     SparseRegexSentenceSplitter,
-    HTMLParserTagStripCleaner,
     TopicListLLM,
     TopicRangeAssignmentLLM,
     TopicRangeLLM,
@@ -44,7 +44,7 @@ class LLamaCPPAdapter:
 
     def call(self, prompt: str, temperature: float) -> str:
         """Call the LLM with a prompt and temperature."""
-        return self._client.call([prompt], temperature=temperature)  # type: ignore[no-any-return]
+        return str(self._client.call([prompt], temperature=temperature))
 
 
 class AsyncLLamaCPPAdapter:
@@ -55,7 +55,7 @@ class AsyncLLamaCPPAdapter:
 
     async def call(self, prompt: str, temperature: float) -> str:
         """Call the LLM with a prompt and temperature."""
-        return await self._client.call([prompt], temperature=temperature)  # type: ignore[no-any-return]
+        return str(await self._client.call([prompt], temperature=temperature))
 
 
 def result_to_dict(result: Any) -> dict[str, Any]:
@@ -394,8 +394,20 @@ def main() -> None:
     parser.add_argument(
         "--anchor-words",
         type=int,
-        default=5,
-        help="Add a marker anchor roughly every N words (default: 5)",
+        default=12,
+        help="Preferred sentence size for long-span splitting (default: 12)",
+    )
+    parser.add_argument(
+        "--long-sentence-threshold",
+        type=int,
+        default=24,
+        help="Only shorten spans longer than N words (default: 24)",
+    )
+    parser.add_argument(
+        "--min-sentence-words",
+        type=int,
+        default=4,
+        help="Avoid creating non-terminal spans shorter than N words (default: 4)",
     )
     parser.add_argument(
         "--max-chunk-chars",
@@ -441,7 +453,11 @@ def create_pipeline(
     tracer: Tracer | None = None,
 ) -> Pipeline:
     """Create pipeline with appropriate configuration."""
-    splitter = SparseRegexSentenceSplitter(anchor_every_words=args.anchor_words)
+    splitter = SparseRegexSentenceSplitter(
+        anchor_every_words=args.anchor_words,
+        long_sentence_word_threshold=args.long_sentence_threshold,
+        min_sentence_words=args.min_sentence_words,
+    )
     html_cleaner = None
     offset_restorer = None
     if input_path.suffix.lower() in {".html", ".htm"}:
@@ -467,6 +483,7 @@ def create_pipeline(
             tracer=tracer,
         )
     else:
+        max_concurrent_requests = args.max_concurrent if async_llm is not None else 1
         return Pipeline(
             splitter=splitter,
             marker=OptimizingMarker(BracketMarker()),
@@ -480,7 +497,7 @@ def create_pipeline(
                 client=async_llm or sync_llm,
                 temperature=args.temperature,
                 chunker=OverlapChunker(max_chars=args.max_chunk_chars),
-                max_concurrent_requests=args.max_concurrent if async_llm else None,
+                max_concurrent_requests=max_concurrent_requests,
                 tracer=tracer,
             ),
             parser=TopicRangeParser(),
@@ -555,7 +572,7 @@ async def run_async(args: Any) -> None:
     sync_llm_callable: LLMCallable = RetryingLLMCallable(
         sync_llm_adapter, max_retries=3, backoff_factor=1.0
     )
-    async_llm_callable = async_llm_adapter
+    async_llm_callable: Any = async_llm_adapter
     if tracer is not None:
         sync_llm_callable = TracingLLMCallable(sync_llm_callable, tracer)
         async_llm_callable = TracingAsyncLLMCallable(async_llm_adapter, tracer)

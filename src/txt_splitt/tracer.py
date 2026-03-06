@@ -29,7 +29,9 @@ class Span:
 
 
 # Global context variable to track the active span for the current task/thread.
-_ACTIVE_SPAN: ContextVar[Span | NoOpSpan | None] = ContextVar("_ACTIVE_SPAN", default=None)
+_ACTIVE_SPAN: ContextVar[Span | NoOpSpan | None] = ContextVar(
+    "_ACTIVE_SPAN", default=None
+)
 
 
 def add_span_attribute(name: str, value: Any) -> None:
@@ -149,7 +151,7 @@ class TracingLLMCallable:
             temperature=temperature,
         ) as s:
             response = self._inner.call(prompt, temperature)
-            # Use setdefault to avoid overwriting attributes already set by the inner client
+            # Avoid overwriting attributes already set by the inner client.
             s.attributes.setdefault("response_length", len(response))
             s.attributes.setdefault("prompt", prompt)
             s.attributes.setdefault("response", response)
@@ -170,8 +172,8 @@ class TracingAsyncLLMCallable:
             temperature=temperature,
         ) as s:
             response = await self._inner.call(prompt, temperature)
-            # Use setdefault to avoid overwriting attributes already set by the inner client
+            # Avoid overwriting attributes already set by the inner client.
             s.attributes.setdefault("response_length", len(response))
             s.attributes.setdefault("prompt", prompt)
             s.attributes.setdefault("response", response)
-            return response
+            return str(response)
