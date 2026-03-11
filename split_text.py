@@ -15,6 +15,7 @@ sys.path.append(str(Path(__file__).parent / "src"))
 
 from txt_splitt import (
     AdjacentSameTopicJoiner,
+    BoundaryEvaluator,
     BracketMarker,
     HTMLParserTagStripCleaner,
     LLMCallable,
@@ -24,6 +25,7 @@ from txt_splitt import (
     OverlapChunker,
     Pipeline,
     RetryingLLMCallable,
+    ShortSentenceEnhancer,
     SparseRegexSentenceSplitter,
     TopicListLLM,
     TopicRangeAssignmentLLM,
@@ -416,6 +418,30 @@ def main() -> None:
         help="Max characters per LLM chunk (default: 84000)",
     )
     parser.add_argument(
+        "--short-sentence-min-length",
+        type=int,
+        default=0,
+        help=(
+            "Enable the short-sentence enhancer for boundary sentences shorter "
+            "than N characters. 0 disables it (default: 0)"
+        ),
+    )
+    parser.add_argument(
+        "--boundary-context-window",
+        type=int,
+        default=3,
+        help="Sentences of context per side for boundary evaluation (default: 3)",
+    )
+    parser.add_argument(
+        "--boundary-max-shift",
+        type=int,
+        default=0,
+        help=(
+            "Enable boundary evaluation and allow shifting up to N sentences "
+            "per boundary. 0 disables it (default: 0)"
+        ),
+    )
+    parser.add_argument(
         "--trace",
         action="store_true",
         help="Enable tracing and print the trace after the run",
@@ -464,6 +490,25 @@ def create_pipeline(
         html_cleaner = HTMLParserTagStripCleaner(strip_tags={"style", "script"})
         offset_restorer = MappingOffsetRestorer()
 
+    enhancers = []
+    if args.short_sentence_min_length > 0:
+        enhancers.append(
+            ShortSentenceEnhancer(
+                sync_llm,
+                min_length=args.short_sentence_min_length,
+                temperature=args.temperature,
+            )
+        )
+    if args.boundary_max_shift > 0:
+        enhancers.append(
+            BoundaryEvaluator(
+                sync_llm,
+                context_window=args.boundary_context_window,
+                max_shift=args.boundary_max_shift,
+                temperature=args.temperature,
+            )
+        )
+
     if args.single_stage:
         return Pipeline(
             splitter=splitter,
@@ -477,6 +522,7 @@ def create_pipeline(
             gap_handler=LLMRepairingGapHandler(
                 sync_llm, temperature=args.temperature, tracer=tracer
             ),
+            enhancers=enhancers,
             joiner=AdjacentSameTopicJoiner(),
             html_cleaner=html_cleaner,
             offset_restorer=offset_restorer,
@@ -504,6 +550,7 @@ def create_pipeline(
             gap_handler=LLMRepairingGapHandler(
                 sync_llm, temperature=args.temperature, tracer=tracer
             ),
+            enhancers=enhancers,
             joiner=AdjacentSameTopicJoiner(),
             html_cleaner=html_cleaner,
             offset_restorer=offset_restorer,

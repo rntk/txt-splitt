@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, final
+from typing import TYPE_CHECKING, Sequence, final
 
 from txt_splitt.joiners import join_sentences_by_groups
 from txt_splitt.protocols import (
@@ -39,7 +39,7 @@ class Pipeline:
         range_assigner: RangeAssigner | None = None,
         parser: ResponseParser,
         gap_handler: GapHandler,
-        enhancer: Enhancer | None = None,
+        enhancers: Sequence[Enhancer] | None = None,
         joiner: GroupJoiner | None = None,
         html_cleaner: HtmlCleaner | None = None,
         offset_restorer: OffsetRestorer | None = None,
@@ -81,7 +81,7 @@ class Pipeline:
         self._range_assigner = range_assigner
         self._parser = parser
         self._gap_handler = gap_handler
-        self._enhancer = enhancer
+        self._enhancers = tuple(enhancers) if enhancers else ()
         self._joiner = joiner
         self._html_cleaner = html_cleaner
         self._offset_restorer = offset_restorer
@@ -138,9 +138,11 @@ class Pipeline:
                 s.attributes["group_count"] = len(groups)
 
             # Stage 6 (optional): Enhance boundaries
-            if self._enhancer is not None:
-                with self._tracer.span("enhance") as s:
-                    groups = self._enhancer.enhance(groups, sentences)
+            for enhancer in self._enhancers:
+                with self._tracer.span(
+                    "enhance", enhancer=type(enhancer).__name__
+                ) as s:
+                    groups = enhancer.enhance(groups, sentences)
                     s.attributes["group_count"] = len(groups)
 
             # Stage 7 (optional): Join adjacent groups
@@ -212,9 +214,11 @@ class Pipeline:
                 s.attributes["group_count"] = len(groups)
 
             # Stage 6 (optional): Enhance boundaries
-            if self._enhancer is not None:
-                with self._tracer.span("enhance") as s:
-                    groups = self._enhancer.enhance(groups, sentences)
+            for enhancer in self._enhancers:
+                with self._tracer.span(
+                    "enhance", enhancer=type(enhancer).__name__
+                ) as s:
+                    groups = enhancer.enhance(groups, sentences)
                     s.attributes["group_count"] = len(groups)
 
             # Stage 7 (optional): Join adjacent groups

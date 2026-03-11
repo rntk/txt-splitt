@@ -321,7 +321,7 @@ class TestPipelineTracing:
             llm=StubLLMStrategy("..."),
             parser=StubParser(groups),
             gap_handler=StubGapHandler(groups),
-            enhancer=StubEnhancer(),
+            enhancers=[StubEnhancer()],
             tracer=tracer,
         )
         pipeline.run("text")

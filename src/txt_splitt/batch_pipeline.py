@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, final
+from typing import TYPE_CHECKING, Sequence, final
 
 from txt_splitt.joiners import join_sentences_by_groups
 from txt_splitt.protocols import (
@@ -48,7 +48,7 @@ class BatchPipeline:
         parser: ResponseParser,
         gap_handler: GapHandler,
         chunker: MarkedTextChunker | None = None,
-        enhancer: Enhancer | None = None,
+        enhancers: Sequence[Enhancer] | None = None,
         joiner: GroupJoiner | None = None,
         html_cleaner: HtmlCleaner | None = None,
         offset_restorer: OffsetRestorer | None = None,
@@ -64,7 +64,7 @@ class BatchPipeline:
         self._parser = parser
         self._gap_handler = gap_handler
         self._chunker = chunker
-        self._enhancer = enhancer
+        self._enhancers = tuple(enhancers) if enhancers else ()
         self._joiner = joiner
         self._html_cleaner = html_cleaner
         self._offset_restorer = offset_restorer
@@ -128,9 +128,11 @@ class BatchPipeline:
                 )
                 s.attributes["group_count"] = len(groups)
 
-            if self._enhancer is not None:
-                with self._tracer.span("enhance") as s:
-                    groups = self._enhancer.enhance(groups, sentences)
+            for enhancer in self._enhancers:
+                with self._tracer.span(
+                    "enhance", enhancer=type(enhancer).__name__
+                ) as s:
+                    groups = enhancer.enhance(groups, sentences)
                     s.attributes["group_count"] = len(groups)
 
             if self._joiner is not None:

@@ -424,7 +424,7 @@ class TestPipeline:
             llm=StubLLM("..."),
             parser=StubParser(groups),
             gap_handler=StubGapHandler(groups),
-            enhancer=None,
+            enhancers=None,
         )
         result = pipeline.run("text")
 
@@ -447,7 +447,7 @@ class TestPipeline:
             llm=StubLLM("..."),
             parser=StubParser(gap_groups),
             gap_handler=StubGapHandler(gap_groups),
-            enhancer=enhancer,
+            enhancers=[enhancer],
         )
         result = pipeline.run("text")
 
@@ -455,6 +455,70 @@ class TestPipeline:
         assert enhancer.seen_sentences == sentences
         # Pipeline returns the enhancer's output
         assert result.groups[0].label == ("Science",)
+
+    def test_multiple_enhancers_run_sequentially(self) -> None:
+        sentences = _make_sentences(3)
+        gap_groups = _make_groups()
+        first_output = [
+            SentenceGroup(label=("First",), ranges=(SentenceRange(start=0, end=1),)),
+        ]
+        second_output = [
+            SentenceGroup(label=("Second",), ranges=(SentenceRange(start=0, end=2),)),
+        ]
+        first = RecordingEnhancer(first_output)
+        second = RecordingEnhancer(second_output)
+
+        pipeline = Pipeline(
+            splitter=StubSplitter(sentences),
+            marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
+            llm=StubLLM("..."),
+            parser=StubParser(gap_groups),
+            gap_handler=StubGapHandler(gap_groups),
+            enhancers=[first, second],
+        )
+        result = pipeline.run("text")
+
+        # First enhancer receives gap handler output
+        assert first.seen_groups == gap_groups
+        # Second enhancer receives first enhancer's output
+        assert second.seen_groups == first_output
+        # Pipeline returns second enhancer's output
+        assert result.groups[0].label == ("Second",)
+
+    def test_multiple_enhancers_run_sequentially_async(self) -> None:
+        import asyncio
+
+        sentences = _make_sentences(3)
+        gap_groups = _make_groups()
+        first_output = [
+            SentenceGroup(label=("First",), ranges=(SentenceRange(start=0, end=1),)),
+        ]
+        second_output = [
+            SentenceGroup(label=("Second",), ranges=(SentenceRange(start=0, end=2),)),
+        ]
+        first = RecordingEnhancer(first_output)
+        second = RecordingEnhancer(second_output)
+
+        class AsyncStubRangeAssigner:
+            async def assign_async(
+                self, marked_text: MarkedText, topics: list[str]
+            ) -> str:
+                return "..."
+
+        pipeline = Pipeline(
+            splitter=StubSplitter(sentences),
+            marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
+            topic_extractor=StubTopicExtractor(["Technology>AI"]),
+            range_assigner=AsyncStubRangeAssigner(),
+            parser=StubParser(gap_groups),
+            gap_handler=StubGapHandler(gap_groups),
+            enhancers=[first, second],
+        )
+        result = asyncio.run(pipeline.run_async("text"))
+
+        assert first.seen_groups == gap_groups
+        assert second.seen_groups == first_output
+        assert result.groups[0].label == ("Second",)
 
     def test_enhancer_error_propagates(self) -> None:
         sentences = _make_sentences(3)
@@ -466,7 +530,7 @@ class TestPipeline:
             llm=StubLLM("..."),
             parser=StubParser(groups),
             gap_handler=StubGapHandler(groups),
-            enhancer=FailingEnhancer(),
+            enhancers=[FailingEnhancer()],
         )
         with pytest.raises(EnhancerError, match="Enhancement failed"):
             pipeline.run("text")
@@ -537,7 +601,7 @@ class TestPipeline:
             llm=StubLLM("..."),
             parser=StubParser(gap_groups),
             gap_handler=StubGapHandler(gap_groups),
-            enhancer=StubEnhancer(enhanced_groups),
+            enhancers=[StubEnhancer(enhanced_groups)],
             joiner=joiner,
         )
         pipeline.run("text")

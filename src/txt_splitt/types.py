@@ -118,3 +118,21 @@ class OffsetMapping:
         idx = bisect.bisect_right(offsets, clean_pos) - 1
         seg = self.segments[idx]
         return seg.original_offset + (clean_pos - seg.clean_offset)
+
+
+def _indices_to_ranges(indices: list[int]) -> list[SentenceRange]:
+    """Convert sorted sentence indices into minimal contiguous ranges."""
+    if not indices:
+        return []
+    ranges: list[SentenceRange] = []
+    start = indices[0]
+    end = indices[0]
+    for idx in indices[1:]:
+        if idx == end + 1:
+            end = idx
+        else:
+            ranges.append(SentenceRange(start=start, end=end))
+            start = idx
+            end = idx
+    ranges.append(SentenceRange(start=start, end=end))
+    return ranges

@@ -2,7 +2,7 @@
 
 from txt_splitt.errors import EnhancerError
 from txt_splitt.protocols import LLMCallable
-from txt_splitt.types import Sentence, SentenceGroup, SentenceRange
+from txt_splitt.types import Sentence, SentenceGroup, _indices_to_ranges
 
 _CONTEXT_SIZE = 3
 
@@ -177,19 +177,3 @@ def _parse_reassignment_response(response: str) -> str | None:
     return None
 
 
-def _indices_to_ranges(indices: list[int]) -> list[SentenceRange]:
-    """Convert sorted sentence indices into minimal contiguous ranges."""
-    if not indices:
-        return []
-    ranges: list[SentenceRange] = []
-    start = indices[0]
-    end = indices[0]
-    for idx in indices[1:]:
-        if idx == end + 1:
-            end = idx
-        else:
-            ranges.append(SentenceRange(start=start, end=end))
-            start = idx
-            end = idx
-    ranges.append(SentenceRange(start=start, end=end))
-    return ranges

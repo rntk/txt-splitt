@@ -1,6 +1,7 @@
 """txt_splitt - A modular, pipeline-based text splitter."""
 
 from txt_splitt.batch_pipeline import BatchPipeline
+from txt_splitt.boundary_evaluator import BoundaryEvaluator
 from txt_splitt.chunkers import OverlapChunker, SizeBasedChunker
 from txt_splitt.enhancers import ShortSentenceEnhancer
 from txt_splitt.errors import (
@@ -125,6 +126,7 @@ __all__ = [
     "SentenceSplitter",
     "TopicExtractor",
     # Concrete implementations
+    "BoundaryEvaluator",
     "BracketMarker",
     "KeywordExtractionLLM",
     "KeywordGapValidator",

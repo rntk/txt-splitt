@@ -273,6 +273,52 @@ def test_finalize_restores_offsets_when_mapping_present() -> None:
     assert result == restored
 
 
+def test_finalize_multiple_enhancers_run_sequentially() -> None:
+    sentences = _make_sentences(3)
+    gap_groups = _make_groups()
+    first_output = [
+        SentenceGroup(label=("First",), ranges=(SentenceRange(start=0, end=1),)),
+    ]
+    second_output = [
+        SentenceGroup(label=("Second",), ranges=(SentenceRange(start=0, end=2),)),
+    ]
+
+    class RecordingEnhancer:
+        def __init__(self, groups: list[SentenceGroup]) -> None:
+            self._groups = groups
+            self.seen_groups: list[SentenceGroup] | None = None
+
+        def enhance(
+            self, groups: list[SentenceGroup], sents: list[Sentence]
+        ) -> list[SentenceGroup]:
+            self.seen_groups = groups
+            return self._groups
+
+    first = RecordingEnhancer(first_output)
+    second = RecordingEnhancer(second_output)
+    pipeline = BatchPipeline(
+        splitter=StubSplitter(sentences),
+        marker=StubMarker(MarkedText(tagged_text="{0} A", sentence_count=1)),
+        parser=StubParser(gap_groups),
+        gap_handler=StubGapHandler(gap_groups),
+        enhancers=[first, second],
+    )
+    prepared = PreparedDocument(
+        original_text="Text",
+        prepared_text="Text",
+        sentences=tuple(sentences),
+        marked_text=MarkedText(tagged_text="{0} A\n{1} B\n{2} C", sentence_count=3),
+        chunks=(),
+        offset_mapping=None,
+    )
+
+    result = pipeline.finalize(prepared, "Technology>AI: 0-2")
+
+    assert first.seen_groups == gap_groups
+    assert second.seen_groups == first_output
+    assert result.groups[0].label == ("Second",)
+
+
 def test_init_requires_html_cleaner_and_offset_restorer_pair() -> None:
     with pytest.raises(
         ValueError,

@@ -6,11 +6,10 @@ import pytest
 
 from txt_splitt.enhancers import (
     ShortSentenceEnhancer,
-    _indices_to_ranges,
     _parse_reassignment_response,
 )
 from txt_splitt.errors import EnhancerError
-from txt_splitt.types import Sentence, SentenceGroup, SentenceRange
+from txt_splitt.types import Sentence, SentenceGroup, SentenceRange, _indices_to_ranges
 
 
 def _make_sentence(index: int, text: str) -> Sentence:
