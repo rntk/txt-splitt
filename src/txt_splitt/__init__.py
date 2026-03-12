@@ -2,6 +2,15 @@
 
 from txt_splitt.batch_pipeline import BatchPipeline
 from txt_splitt.boundary_evaluator import BoundaryEvaluator
+from txt_splitt.cache import (
+    AsyncLLMCacheStore,
+    CacheEntry,
+    CachingAsyncLLMCallable,
+    CachingLLMCallable,
+    LLMCacheStore,
+    MemoryLLMCacheStore,
+    SQLiteLLMCacheStore,
+)
 from txt_splitt.chunkers import OverlapChunker, SizeBasedChunker
 from txt_splitt.enhancers import ShortSentenceEnhancer
 from txt_splitt.errors import (
@@ -91,6 +100,14 @@ __all__ = [
     "BatchPipeline",
     "KeywordPipeline",
     "Pipeline",
+    # Cache
+    "AsyncLLMCacheStore",
+    "CacheEntry",
+    "CachingAsyncLLMCallable",
+    "CachingLLMCallable",
+    "LLMCacheStore",
+    "MemoryLLMCacheStore",
+    "SQLiteLLMCacheStore",
     # Types
     "Keyword",
     "KeywordResult",

@@ -17,6 +17,8 @@ from txt_splitt import (
     AdjacentSameTopicJoiner,
     BoundaryEvaluator,
     BracketMarker,
+    CachingAsyncLLMCallable,
+    CachingLLMCallable,
     HTMLParserTagStripCleaner,
     LLMCallable,
     LLMRepairingGapHandler,
@@ -27,6 +29,7 @@ from txt_splitt import (
     RetryingLLMCallable,
     ShortSentenceEnhancer,
     SparseRegexSentenceSplitter,
+    SQLiteLLMCacheStore,
     TopicListLLM,
     TopicRangeAssignmentLLM,
     TopicRangeLLM,
@@ -36,6 +39,7 @@ from txt_splitt import (
     TracingLLMCallable,
 )
 from txt_splitt.llms.llamacpp import AsyncLLamaCPP, LLamaCPP
+from txt_splitt.protocols import AsyncLLMCallable, Enhancer
 
 
 class LLamaCPPAdapter:
@@ -58,6 +62,62 @@ class AsyncLLamaCPPAdapter:
     async def call(self, prompt: str, temperature: float) -> str:
         """Call the LLM with a prompt and temperature."""
         return str(await self._client.call([prompt], temperature=temperature))
+
+
+def build_cache_store(args: Any) -> SQLiteLLMCacheStore | None:
+    """Create a persistent SQLite cache store when configured."""
+    cache_db = getattr(args, "cache_db", None)
+    if not cache_db:
+        return None
+    return SQLiteLLMCacheStore(cache_db)
+
+
+def wrap_sync_llm(
+    llm: LLMCallable,
+    *,
+    namespace: str,
+    args: Any,
+    tracer: Tracer | None = None,
+    cache_store: SQLiteLLMCacheStore | None = None,
+) -> LLMCallable:
+    """Apply optional caching and tracing to a sync LLM client."""
+    wrapped: LLMCallable = llm
+    if cache_store is not None:
+        wrapped = CachingLLMCallable(
+            wrapped,
+            cache_store,
+            namespace=namespace,
+            model_id=str(args.model),
+            prompt_version="split_text_v1",
+            cache_nonzero_temperature=bool(args.cache_nonzero_temperature),
+        )
+    if tracer is not None:
+        wrapped = TracingLLMCallable(wrapped, tracer)
+    return wrapped
+
+
+def wrap_async_llm(
+    llm: AsyncLLMCallable,
+    *,
+    namespace: str,
+    args: Any,
+    tracer: Tracer | None = None,
+    cache_store: SQLiteLLMCacheStore | None = None,
+) -> AsyncLLMCallable:
+    """Apply optional caching and tracing to an async LLM client."""
+    wrapped: AsyncLLMCallable = llm
+    if cache_store is not None:
+        wrapped = CachingAsyncLLMCallable(
+            wrapped,
+            cache_store,
+            namespace=namespace,
+            model_id=str(args.model),
+            prompt_version="split_text_v1",
+            cache_nonzero_temperature=bool(args.cache_nonzero_temperature),
+        )
+    if tracer is not None:
+        wrapped = TracingAsyncLLMCallable(wrapped, tracer)
+    return wrapped
 
 
 def result_to_dict(result: Any) -> dict[str, Any]:
@@ -463,6 +523,18 @@ def main() -> None:
         action="store_true",
         help="Use single-stage LLM split instead of two-stage",
     )
+    parser.add_argument(
+        "--cache-db",
+        help=(
+            "SQLite database path for persistent LLM response caching. "
+            "Disabled when omitted."
+        ),
+    )
+    parser.add_argument(
+        "--cache-nonzero-temperature",
+        action="store_true",
+        help="Also cache requests with non-zero temperature",
+    )
     args = parser.parse_args()
 
     if args.use_async:
@@ -475,10 +547,32 @@ def create_pipeline(
     args: Any,
     input_path: Path,
     sync_llm: LLMCallable,
-    async_llm: Any = None,
+    async_llm: AsyncLLMCallable | None = None,
     tracer: Tracer | None = None,
+    cache_store: SQLiteLLMCacheStore | None = None,
 ) -> Pipeline:
     """Create pipeline with appropriate configuration."""
+    topic_range_llm = wrap_sync_llm(
+        sync_llm,
+        namespace="topic-range",
+        args=args,
+        tracer=tracer,
+        cache_store=cache_store,
+    )
+    topic_list_llm = wrap_sync_llm(
+        sync_llm,
+        namespace="topic-list",
+        args=args,
+        tracer=tracer,
+        cache_store=cache_store,
+    )
+    gap_repair_llm = wrap_sync_llm(
+        sync_llm,
+        namespace="gap-repair",
+        args=args,
+        tracer=tracer,
+        cache_store=cache_store,
+    )
     splitter = SparseRegexSentenceSplitter(
         anchor_every_words=args.anchor_words,
         long_sentence_word_threshold=args.long_sentence_threshold,
@@ -490,11 +584,17 @@ def create_pipeline(
         html_cleaner = HTMLParserTagStripCleaner(strip_tags={"style", "script"})
         offset_restorer = MappingOffsetRestorer()
 
-    enhancers = []
+    enhancers: list[Enhancer] = []
     if args.short_sentence_min_length > 0:
         enhancers.append(
             ShortSentenceEnhancer(
-                sync_llm,
+                wrap_sync_llm(
+                    sync_llm,
+                    namespace="short-sentence-enhancer",
+                    args=args,
+                    tracer=tracer,
+                    cache_store=cache_store,
+                ),
                 min_length=args.short_sentence_min_length,
                 temperature=args.temperature,
             )
@@ -502,7 +602,13 @@ def create_pipeline(
     if args.boundary_max_shift > 0:
         enhancers.append(
             BoundaryEvaluator(
-                sync_llm,
+                wrap_sync_llm(
+                    sync_llm,
+                    namespace="boundary-evaluator",
+                    args=args,
+                    tracer=tracer,
+                    cache_store=cache_store,
+                ),
                 context_window=args.boundary_context_window,
                 max_shift=args.boundary_max_shift,
                 temperature=args.temperature,
@@ -514,13 +620,15 @@ def create_pipeline(
             splitter=splitter,
             marker=OptimizingMarker(BracketMarker()),
             llm=TopicRangeLLM(
-                client=sync_llm,
+                client=topic_range_llm,
                 temperature=args.temperature,
                 chunker=OverlapChunker(max_chars=args.max_chunk_chars),
             ),
             parser=TopicRangeParser(),
             gap_handler=LLMRepairingGapHandler(
-                sync_llm, temperature=args.temperature, tracer=tracer
+                gap_repair_llm,
+                temperature=args.temperature,
+                tracer=tracer,
             ),
             enhancers=enhancers,
             joiner=AdjacentSameTopicJoiner(),
@@ -530,17 +638,34 @@ def create_pipeline(
         )
     else:
         max_concurrent_requests = args.max_concurrent if async_llm is not None else 1
+        range_assigner_client: LLMCallable | AsyncLLMCallable
+        if async_llm is not None:
+            range_assigner_client = wrap_async_llm(
+                async_llm,
+                namespace="topic-range-assignment",
+                args=args,
+                tracer=tracer,
+                cache_store=cache_store,
+            )
+        else:
+            range_assigner_client = wrap_sync_llm(
+                sync_llm,
+                namespace="topic-range-assignment",
+                args=args,
+                tracer=tracer,
+                cache_store=cache_store,
+            )
         return Pipeline(
             splitter=splitter,
             marker=OptimizingMarker(BracketMarker()),
             topic_extractor=TopicListLLM(
-                client=sync_llm,
+                client=topic_list_llm,
                 temperature=args.temperature,
                 chunker=OverlapChunker(max_chars=args.max_chunk_chars),
                 tracer=tracer,
             ),
             range_assigner=TopicRangeAssignmentLLM(
-                client=async_llm or sync_llm,
+                client=range_assigner_client,
                 temperature=args.temperature,
                 chunker=OverlapChunker(max_chars=args.max_chunk_chars),
                 max_concurrent_requests=max_concurrent_requests,
@@ -548,7 +673,9 @@ def create_pipeline(
             ),
             parser=TopicRangeParser(),
             gap_handler=LLMRepairingGapHandler(
-                sync_llm, temperature=args.temperature, tracer=tracer
+                gap_repair_llm,
+                temperature=args.temperature,
+                tracer=tracer,
             ),
             enhancers=enhancers,
             joiner=AdjacentSameTopicJoiner(),
@@ -573,11 +700,15 @@ def run_sync(args: Any) -> None:
     )
 
     tracer: Tracer | None = Tracer() if args.trace else None
-    llm_callable: LLMCallable = llm_with_retry
-    if tracer is not None:
-        llm_callable = TracingLLMCallable(llm_with_retry, tracer)
+    cache_store = build_cache_store(args)
 
-    pipeline = create_pipeline(args, input_path, llm_callable, tracer=tracer)
+    pipeline = create_pipeline(
+        args,
+        input_path,
+        llm_with_retry,
+        tracer=tracer,
+        cache_store=cache_store,
+    )
 
     print(f"Processing '{args.input_file}'...")
     trace_output: str | None = None
@@ -619,13 +750,16 @@ async def run_async(args: Any) -> None:
     sync_llm_callable: LLMCallable = RetryingLLMCallable(
         sync_llm_adapter, max_retries=3, backoff_factor=1.0
     )
-    async_llm_callable: Any = async_llm_adapter
-    if tracer is not None:
-        sync_llm_callable = TracingLLMCallable(sync_llm_callable, tracer)
-        async_llm_callable = TracingAsyncLLMCallable(async_llm_adapter, tracer)
+    async_llm_callable: AsyncLLMCallable = async_llm_adapter
+    cache_store = build_cache_store(args)
 
     pipeline = create_pipeline(
-        args, input_path, sync_llm_callable, async_llm_callable, tracer
+        args,
+        input_path,
+        sync_llm_callable,
+        async_llm_callable,
+        tracer,
+        cache_store,
     )
 
     print(

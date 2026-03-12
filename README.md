@@ -31,6 +31,35 @@ pip install "git+https://github.com/rntk/txt-splitt.git@v0.1.0"
 pip install "git+https://github.com/rntk/txt-splitt.git@main"
 ```
 
+## LLM Cache Wrappers
+
+The package includes cache wrappers that can sit around any `LLMCallable` or
+`AsyncLLMCallable`:
+
+- `CachingLLMCallable`
+- `CachingAsyncLLMCallable`
+- `MemoryLLMCacheStore`
+- `SQLiteLLMCacheStore`
+
+The cache backend is pluggable. If you already use MongoDB, Redis, or another
+application store, implement the cache-store protocol and pass your store into
+the wrapper. The wrapper owns key generation; your store only needs `get()` and
+`set()` operations for `CacheEntry` records.
+
+```python
+from txt_splitt import CachingLLMCallable, TopicRangeLLM
+
+cached_client = CachingLLMCallable(
+    inner=my_llm_client,
+    store=my_mongo_cache_store,
+    namespace="topic-range",
+    model_id="gpt-4o-mini",
+    prompt_version="v1",
+)
+
+llm = TopicRangeLLM(cached_client)
+```
+
 ## Development with Docker
 
 Prerequisites:
