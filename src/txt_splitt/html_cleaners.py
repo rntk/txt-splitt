@@ -10,6 +10,117 @@ from txt_splitt.types import OffsetMapping, OffsetSegment
 _HTML_TAG_PATTERN = re.compile(r"""<(?:[^>"']|"[^"]*"|'[^']*')*>""")
 
 
+def _merge_spans(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Sort and merge overlapping or adjacent spans."""
+    if not spans:
+        return []
+
+    spans.sort()
+    merged: list[tuple[int, int]] = [spans[0]]
+    for start, end in spans[1:]:
+        prev_start, prev_end = merged[-1]
+        if start <= prev_end:
+            merged[-1] = (prev_start, max(prev_end, end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def _append_preserved_run(
+    clean_parts: list[str],
+    segments: list[OffsetSegment],
+    clean_offset: int,
+    run_text: str,
+    original_offset: int,
+    separator_offset: int | None,
+) -> int:
+    """Append a preserved text run and an optional synthetic separator."""
+    if not run_text:
+        return clean_offset
+
+    if (
+        clean_parts
+        and separator_offset is not None
+        and not clean_parts[-1][-1].isspace()
+        and not run_text[0].isspace()
+    ):
+        clean_parts.append(" ")
+        # Synthetic separators stay back-mappable by anchoring them to the
+        # start of the removed span between two preserved text runs.
+        segments.append(
+            OffsetSegment(
+                clean_offset=clean_offset,
+                original_offset=separator_offset,
+                length=1,
+            )
+        )
+        clean_offset += 1
+
+    clean_parts.append(run_text)
+    segments.append(
+        OffsetSegment(
+            clean_offset=clean_offset,
+            original_offset=original_offset,
+            length=len(run_text),
+        )
+    )
+    return clean_offset + len(run_text)
+
+
+def _build_clean_text_and_mapping(
+    text: str,
+    spans: list[tuple[int, int]],
+) -> tuple[str, OffsetMapping]:
+    """Build clean text and offset mapping from spans to remove."""
+    if not spans:
+        mapping = OffsetMapping(
+            segments=(
+                OffsetSegment(clean_offset=0, original_offset=0, length=len(text)),
+            ),
+            original_length=len(text),
+            clean_length=len(text),
+        )
+        return text, mapping
+
+    merged = _merge_spans(spans)
+    segments: list[OffsetSegment] = []
+    clean_parts: list[str] = []
+    clean_offset = 0
+    last_end = 0
+    separator_offset: int | None = None
+
+    for span_start, span_end in merged:
+        if span_start > last_end:
+            clean_offset = _append_preserved_run(
+                clean_parts=clean_parts,
+                segments=segments,
+                clean_offset=clean_offset,
+                run_text=text[last_end:span_start],
+                original_offset=last_end,
+                separator_offset=separator_offset,
+            )
+        last_end = span_end
+        separator_offset = span_start
+
+    if last_end < len(text):
+        clean_offset = _append_preserved_run(
+            clean_parts=clean_parts,
+            segments=segments,
+            clean_offset=clean_offset,
+            run_text=text[last_end:],
+            original_offset=last_end,
+            separator_offset=separator_offset,
+        )
+
+    clean_text = "".join(clean_parts)
+    mapping = OffsetMapping(
+        segments=tuple(segments),
+        original_length=len(text),
+        clean_length=clean_offset,
+    )
+    return clean_text, mapping
+
+
 class TagStripCleaner:
     """Strip HTML tags from text, producing clean text and an offset mapping.
 
@@ -48,63 +159,7 @@ class TagStripCleaner:
                 (m.start(), m.end()) for m in self._strip_pattern.finditer(text)
             )
 
-        if not skip_regions:
-            seg = OffsetSegment(clean_offset=0, original_offset=0, length=len(text))
-            return text, OffsetMapping(
-                segments=(seg,),
-                original_length=len(text),
-                clean_length=len(text),
-            )
-
-        # Sort and merge overlapping / adjacent regions
-        skip_regions.sort()
-        merged: list[tuple[int, int]] = [skip_regions[0]]
-        for start, end in skip_regions[1:]:
-            prev_start, prev_end = merged[-1]
-            if start <= prev_end:
-                merged[-1] = (prev_start, max(prev_end, end))
-            else:
-                merged.append((start, end))
-
-        segments: list[OffsetSegment] = []
-        clean_parts: list[str] = []
-        clean_offset = 0
-        last_end = 0
-
-        for skip_start, skip_end in merged:
-            if skip_start > last_end:
-                seg_length = skip_start - last_end
-                segments.append(
-                    OffsetSegment(
-                        clean_offset=clean_offset,
-                        original_offset=last_end,
-                        length=seg_length,
-                    )
-                )
-                clean_parts.append(text[last_end:skip_start])
-                clean_offset += seg_length
-            last_end = skip_end
-
-        # Text after the last skip region
-        if last_end < len(text):
-            seg_length = len(text) - last_end
-            segments.append(
-                OffsetSegment(
-                    clean_offset=clean_offset,
-                    original_offset=last_end,
-                    length=seg_length,
-                )
-            )
-            clean_parts.append(text[last_end:])
-            clean_offset += seg_length
-
-        clean_text = "".join(clean_parts)
-        mapping = OffsetMapping(
-            segments=tuple(segments),
-            original_length=len(text),
-            clean_length=len(clean_text),
-        )
-        return clean_text, mapping
+        return _build_clean_text_and_mapping(text, skip_regions)
 
 
 class _TagSpanParser(HTMLParser):
@@ -226,52 +281,4 @@ class HTMLParserTagStripCleaner:
         parser.feed(text)
         parser.close()
         spans = parser.spans
-        if not spans:
-            mapping = OffsetMapping(
-                segments=(
-                    OffsetSegment(clean_offset=0, original_offset=0, length=len(text)),
-                ),
-                original_length=len(text),
-                clean_length=len(text),
-            )
-            return text, mapping
-
-        segments: list[OffsetSegment] = []
-        clean_parts: list[str] = []
-        clean_offset = 0
-        last_end = 0
-
-        for tag_start, tag_end in spans:
-            if tag_start > last_end:
-                seg_length = tag_start - last_end
-                segments.append(
-                    OffsetSegment(
-                        clean_offset=clean_offset,
-                        original_offset=last_end,
-                        length=seg_length,
-                    )
-                )
-                clean_parts.append(text[last_end:tag_start])
-                clean_offset += seg_length
-            if tag_end > last_end:
-                last_end = tag_end
-
-        if last_end < len(text):
-            seg_length = len(text) - last_end
-            segments.append(
-                OffsetSegment(
-                    clean_offset=clean_offset,
-                    original_offset=last_end,
-                    length=seg_length,
-                )
-            )
-            clean_parts.append(text[last_end:])
-            clean_offset += seg_length
-
-        clean_text = "".join(clean_parts)
-        mapping = OffsetMapping(
-            segments=tuple(segments),
-            original_length=len(text),
-            clean_length=len(clean_text),
-        )
-        return clean_text, mapping
+        return _build_clean_text_and_mapping(text, spans)

@@ -38,8 +38,10 @@ class TestTagStripCleaner:
     def test_self_closing_tag(self) -> None:
         text = "Hello<br/>world"
         clean, mapping = self.cleaner.clean(text)
-        assert clean == "Helloworld"
-        assert mapping.clean_length == 10
+        assert clean == "Hello world"
+        assert mapping.clean_length == 11
+        assert mapping.to_original(5) == 5
+        assert mapping.to_original(6) == 10
 
     def test_tag_with_attributes(self) -> None:
         text = 'A <a href="http://x.com">link</a> B'
@@ -54,8 +56,8 @@ class TestTagStripCleaner:
     def test_multiple_tags(self) -> None:
         text = "<h1>Title</h1><p>Body</p>"
         clean, mapping = self.cleaner.clean(text)
-        assert clean == "TitleBody"
-        assert mapping.clean_length == 9
+        assert clean == "Title Body"
+        assert mapping.clean_length == 10
 
     def test_adjacent_tags_no_text(self) -> None:
         text = "<br><hr><img/>"
@@ -71,11 +73,13 @@ class TestTagStripCleaner:
         assert clean == ""
         assert mapping.clean_length == 0
 
-    def test_segment_count_matches_text_runs(self) -> None:
+    def test_segment_count_includes_synthetic_spaces(self) -> None:
         text = "A<b>B</b>C"
         clean, mapping = self.cleaner.clean(text)
-        assert clean == "ABC"
-        assert len(mapping.segments) == 3
+        assert clean == "A B C"
+        assert len(mapping.segments) == 5
+        assert mapping.to_original(1) == 1
+        assert mapping.to_original(3) == 5
 
     def test_mapping_lengths_consistent(self) -> None:
         text = "Hello <em>world</em>!"
@@ -154,13 +158,13 @@ class TestOffsetMapping:
         original = "AB<b>CD</b>EF"
         cleaner = TagStripCleaner()
         clean, mapping = cleaner.clean(original)
-        assert clean == "ABCDEF"
+        assert clean == "AB CD EF"
 
-        expected = [0, 1, 5, 6, 11, 12]  # A B C D E F
+        expected = [0, 1, 2, 5, 6, 7, 11, 12]  # A B _ C D _ E F
         for i, expected_orig in enumerate(expected):
             assert mapping.to_original(i) == expected_orig, f"pos {i}"
         # End position
-        assert mapping.to_original(6) == len(original)
+        assert mapping.to_original(8) == len(original)
 
     def test_identity_mapping_no_tags(self) -> None:
         """Text without tags should produce identity mapping."""
@@ -211,7 +215,7 @@ class _StripTagsMixin:
         c = self._make_cleaner(strip_tags={"script"})
         text = "<p>Hello</p><script>var x=1;</script><p>World</p>"
         clean, mapping = c.clean(text)
-        assert clean == "HelloWorld"
+        assert clean == "Hello World"
         assert mapping.original_length == len(text)
         assert mapping.clean_length == len(clean)
 
@@ -249,7 +253,7 @@ class _StripTagsMixin:
         c = self._make_cleaner(strip_tags={"style"})
         text = "Before<style>css</style>After"
         clean, mapping = c.clean(text)
-        assert clean == "BeforeAfter"
+        assert clean == "Before After"
         total_seg_length = sum(seg.length for seg in mapping.segments)
         assert total_seg_length == mapping.clean_length
 
@@ -259,12 +263,13 @@ class _StripTagsMixin:
         # 0  1  2.......................25 26 27
         text = "AB<script>ignored</script>CD"
         clean, mapping = c.clean(text)
-        assert clean == "ABCD"
+        assert clean == "AB CD"
         assert mapping.to_original(0) == 0  # A
         assert mapping.to_original(1) == 1  # B
-        assert mapping.to_original(2) == 26  # C
-        assert mapping.to_original(3) == 27  # D
-        assert mapping.to_original(4) == 28  # end
+        assert mapping.to_original(2) == 2  # synthetic separator
+        assert mapping.to_original(3) == 26  # C
+        assert mapping.to_original(4) == 27  # D
+        assert mapping.to_original(5) == 28  # end
 
     def test_mapping_lengths_consistent_with_strip(self) -> None:
         c = self._make_cleaner(strip_tags={"script", "style"})
@@ -291,7 +296,7 @@ class TestHTMLParserTagStripCleanerStripTags(_StripTagsMixin):
         c = self._make_cleaner(strip_tags={"style"})
         text = "<style/>A<b>B</b>"
         clean, _ = c.clean(text)
-        assert clean == "AB"
+        assert clean == "A B"
 
     def test_strip_unclosed_tag_to_end_of_input(self) -> None:
         c = self._make_cleaner(strip_tags={"script"})
