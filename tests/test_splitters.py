@@ -262,33 +262,23 @@ class TestAbbreviationHandling:
         assert len(result) == 2
         assert result[0].text.startswith("Mr.")
 
-    def test_etc_does_not_split(self) -> None:
-        # etc. should not split; the whole phrase becomes one sentence
-        text = "Items include hats, coats, etc. The list is long."
+    def test_etc_mid_sentence_no_split(self) -> None:
+        # etc. inside a clause — the comma after makes it clearly mid-sentence
+        text = "We accept cash, checks, etc. and other payment types."
         result = self._splitter().split(text)
         assert len(result) == 1
-        assert "etc." in result[0].text
+
+    def test_etc_sentence_final_splits(self) -> None:
+        # etc. at the end of a clause — a genuine boundary must still be recognised
+        text = "Items include hats, coats, etc. The list is long."
+        result = self._splitter().split(text)
+        assert len(result) == 2
 
     def test_real_period_still_splits(self) -> None:
         text = "The doctor arrived. She examined the patient."
         result = self._splitter().split(text)
         assert len(result) == 2
 
-
-class TestNewlineUppercaseBoundary:
-    def _splitter(self) -> SparseRegexSentenceSplitter:
-        return SparseRegexSentenceSplitter(anchor_every_words=24)
-
-    def test_newline_uppercase_splits(self) -> None:
-        # Each part has enough words to survive _merge_short_nonterminal_spans
-        text = "The first sentence lacks punctuation\nThe second sentence starts here"
-        result = self._splitter().split(text)
-        assert len(result) == 2
-
-    def test_newline_lowercase_no_split(self) -> None:
-        text = "First line here\nsecond continues"
-        result = self._splitter().split(text)
-        assert len(result) == 1
 
 
 class TestEmDashNotSplitting:

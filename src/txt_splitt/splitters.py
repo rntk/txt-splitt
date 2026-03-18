@@ -31,6 +31,10 @@ _HTML_ENTITY_PATTERN = re.compile(
     r"&(?:#[0-9]+|#x[0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]{1,31});"
 )
 _LIST_MARKER_PATTERN = re.compile(r"(?:\d{1,3}|[a-zA-Z]|[ivxIVX]{1,5})[.)]")
+# Only title/honorific abbreviations that are structurally incapable of ending a
+# sentence — they always introduce a proper name.  Abbreviations that can appear
+# sentence-finally (etc., Inc., Ltd., vs., Jr., Sr., St. …) are intentionally
+# excluded so that genuine boundaries like "Acme Inc. The office …" still split.
 _KNOWN_ABBREVIATIONS: frozenset[str] = frozenset(
     {
         "Mr.",
@@ -38,14 +42,6 @@ _KNOWN_ABBREVIATIONS: frozenset[str] = frozenset(
         "Ms.",
         "Dr.",
         "Prof.",
-        "St.",
-        "Jr.",
-        "Sr.",
-        "vs.",
-        "etc.",
-        "Inc.",
-        "Ltd.",
-        "Corp.",
         "Gen.",
         "Gov.",
         "Sgt.",
@@ -214,14 +210,6 @@ def _collect_boundaries(text: str, context: _SplitContext) -> list[tuple[int, in
 
     for match in _BLANK_LINE_BOUNDARY_PATTERN.finditer(text):
         start, end = match.span()
-        if not context.boundary_allowed(start, end):
-            continue
-        candidates.append(_BoundaryCandidate(start, end, _PRIORITY_BLANK_LINE))
-
-    for match in _SINGLE_NEWLINE_BOUNDARY_PATTERN.finditer(text):
-        start, end = match.span()
-        if not _starts_like_sentence_start(text, end):
-            continue
         if not context.boundary_allowed(start, end):
             continue
         candidates.append(_BoundaryCandidate(start, end, _PRIORITY_BLANK_LINE))
