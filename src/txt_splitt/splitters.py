@@ -10,12 +10,6 @@ from dataclasses import dataclass
 
 from txt_splitt.types import Sentence
 
-# Uppercase letter class for sentence boundary lookahead:
-# - A-Z: Basic Latin capitals
-# - À-Ö, Ø-Þ: Latin Extended capitals (accented, e.g. À É Ñ Ü)
-# - А-ЯЁ: Cyrillic capitals (including Ё)
-_UPPER = r"A-ZÀ-ÖØ-ÞА-ЯЁ"
-
 # Closing characters that may follow sentence-ending punctuation before whitespace:
 # straight/curly quotes, closing parens/brackets, guillemet
 _CLOSING = r"\"'\u201D\u2019)\]\u00BB"
@@ -27,7 +21,10 @@ _SEMICOLON_OR_COLON_BOUNDARY_PATTERN = re.compile(r"(?<=[;:])\s+")
 _BLANK_LINE_BOUNDARY_PATTERN = re.compile(r"\n\s*\n+")
 _SINGLE_NEWLINE_BOUNDARY_PATTERN = re.compile(r"(?<!\n)\n(?!\n)")
 _SEPARATOR_BOUNDARY_PATTERN = re.compile(r"\s+[·•|]\s+")
-_UPPERCASE_PATTERN = re.compile(rf"[{_UPPER}]")
+_OPENING_QUOTES_BRACKETS: frozenset[str] = frozenset("\"'([{<\u201c\u2018\u00ab")
+_SENTENCE_START_CATEGORIES: frozenset[str] = frozenset(
+    {"Lu", "Lt", "Lo", "So", "Nd", "Nl"}
+)
 _WORD_PATTERN = re.compile(r"\S+")
 _HTML_TAG_PATTERN = re.compile(r"<(?:[^>\"']|\"[^\"]*\"|'[^']*')*>")
 _HTML_ENTITY_PATTERN = re.compile(
@@ -200,12 +197,10 @@ def _collect_boundaries(text: str, context: _SplitContext) -> list[tuple[int, in
 def _starts_like_sentence_start(text: str, pos: int) -> bool:
     if pos >= len(text):
         return False
-    if _UPPERCASE_PATTERN.match(text, pos) is not None:
-        return True
     ch = text[pos]
-    if ch.isdigit():
+    if ch in _OPENING_QUOTES_BRACKETS:
         return True
-    return ch in "\"'([{<\u201c\u2018\u00ab"
+    return unicodedata.category(ch) in _SENTENCE_START_CATEGORIES
 
 
 def _entity_ends_at(text: str, boundary_start: int) -> bool:
@@ -699,7 +694,7 @@ def _merge_short_nonterminal_spans(
             index += 1
             continue
         if not merged and next_span is not None:
-            if _has_strong_layout_gap(text[end:next_span[0]]):
+            if _has_strong_layout_gap(text[end : next_span[0]]):
                 merged.append([start, end])
             else:
                 pending[index + 1] = (start, next_span[1])
@@ -716,7 +711,7 @@ def _merge_short_nonterminal_spans(
             pending[index + 1] = (start, next_span[1])
             index += 1
             continue
-        if _has_strong_layout_gap(text[end:next_span[0]]):
+        if _has_strong_layout_gap(text[end : next_span[0]]):
             merged[-1][1] = end
             index += 1
             continue

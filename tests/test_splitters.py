@@ -42,8 +42,7 @@ class TestSparseRegexSentenceSplitter:
         assert len(result) == 2
         assert result[0].text == "one two three four five"
         assert (
-            result[1].text
-            == "six seven eight nine ten eleven twelve thirteen fourteen"
+            result[1].text == "six seven eight nine ten eleven twelve thirteen fourteen"
         )
 
     def test_char_offsets_allow_slicing(self) -> None:
@@ -269,3 +268,55 @@ class TestEmDashNotSplitting:
         assert result[0].text == "Lambo demand is \u201cclose to zero.\u201d"
         amazon_text = " ".join(s.text for s in result[1:])
         assert "\u2014" in amazon_text
+
+
+class TestEmojiAndUnicodeSentenceStart:
+    def test_emoji_after_period_bird(self) -> None:
+        splitter = SparseRegexSentenceSplitter(anchor_every_words=24)
+        text = "The rain stopped at noon. \U0001f989 A new day began."
+        result = splitter.split(text)
+        assert len(result) == 2
+        assert result[0].text == "The rain stopped at noon."
+        assert result[1].text == "\U0001f989 A new day began."
+
+    def test_emoji_after_period_wolf(self) -> None:
+        splitter = SparseRegexSentenceSplitter(anchor_every_words=24)
+        text = "She closed the book. \U0001f43a The night was quiet."
+        result = splitter.split(text)
+        assert len(result) == 2
+        assert result[0].text == "She closed the book."
+        assert result[1].text == "\U0001f43a The night was quiet."
+
+    def test_emoji_starts_sentence_directly(self) -> None:
+        splitter = SparseRegexSentenceSplitter(anchor_every_words=24)
+        text = "The park was empty. \U0001f436Dogs love open spaces."
+        result = splitter.split(text)
+        assert len(result) == 2
+        assert result[1].text == "\U0001f436Dogs love open spaces."
+
+    def test_cjk_sentence_start(self) -> None:
+        # CJK text has no spaces so counts as 1 word; use min_sentence_words=1
+        # to prevent the short-span merge from re-joining the split.
+        splitter = SparseRegexSentenceSplitter(
+            anchor_every_words=24, min_sentence_words=1
+        )
+        text = "The meeting ended. \u4eca\u65e5\u306f\u6674\u308c\u3067\u3059\u3002"
+        result = splitter.split(text)
+        assert len(result) == 2
+        assert result[1].text == "\u4eca\u65e5\u306f\u6674\u308c\u3067\u3059\u3002"
+
+    def test_greek_uppercase_sentence_start(self) -> None:
+        splitter = SparseRegexSentenceSplitter(anchor_every_words=24)
+        # "Αυτό είναι." — Greek uppercase start
+        text = "The session ended. \u0391\u03c5\u03c4\u03cc."
+        result = splitter.split(text)
+        assert len(result) == 2
+        assert result[1].text.startswith("\u0391")
+
+    def test_arabic_sentence_start(self) -> None:
+        splitter = SparseRegexSentenceSplitter(anchor_every_words=24)
+        # "مرحباً بالعالم." (Hello world.)
+        text = "The session ended. \u0645\u0631\u062d\u0628\u0627\u064b."
+        result = splitter.split(text)
+        assert len(result) == 2
+        assert result[1].text.startswith("\u0645")
