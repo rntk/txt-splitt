@@ -15,7 +15,7 @@ from txt_splitt.types import Sentence
 _CLOSING = r"\"'\u201D\u2019)\]\u00BB"
 
 _TERMINAL_BOUNDARY_PATTERN = re.compile(
-    rf"(?P<punct>[.!?\u2026])(?:[{_CLOSING}])?(?P<gap>\s+)"
+    rf"(?P<punct>[.!?\u2026])(?:[{_CLOSING}])*(?P<gap>\s+)"
 )
 _SEMICOLON_OR_COLON_BOUNDARY_PATTERN = re.compile(r"(?<=[;:])\s+")
 _BLANK_LINE_BOUNDARY_PATTERN = re.compile(r"\n\s*\n+")
@@ -31,6 +31,28 @@ _HTML_ENTITY_PATTERN = re.compile(
     r"&(?:#[0-9]+|#x[0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]{1,31});"
 )
 _LIST_MARKER_PATTERN = re.compile(r"(?:\d{1,3}|[a-zA-Z]|[ivxIVX]{1,5})[.)]")
+_KNOWN_ABBREVIATIONS: frozenset[str] = frozenset(
+    {
+        "Mr.",
+        "Mrs.",
+        "Ms.",
+        "Dr.",
+        "Prof.",
+        "St.",
+        "Jr.",
+        "Sr.",
+        "vs.",
+        "etc.",
+        "Inc.",
+        "Ltd.",
+        "Corp.",
+        "Gen.",
+        "Gov.",
+        "Sgt.",
+        "Col.",
+        "Capt.",
+    }
+)
 _BRIDGE_PATTERN = re.compile(r"[^\w\s\.!\?\u2026]{1,5}")
 _HORIZONTAL_WS_PATTERN = re.compile(r"[ \t\xa0\u2000-\u200a\u202f\u205f\u3000]+")
 _EXCESS_NEWLINES_PATTERN = re.compile(r"\n{3,}")
@@ -175,6 +197,11 @@ def _collect_boundaries(text: str, context: _SplitContext) -> list[tuple[int, in
         gap_start, gap_end = match.span("gap")
         if not _starts_like_sentence_start(text, gap_end):
             continue
+        punct_end = match.end("punct")
+        if text[punct_end - 1] == "." and _preceded_by_abbreviation(
+            text, punct_end - 1
+        ):
+            continue
         if not context.boundary_allowed(gap_start, gap_end):
             continue
         candidates.append(_BoundaryCandidate(gap_start, gap_end, _PRIORITY_TERMINAL))
@@ -191,6 +218,14 @@ def _collect_boundaries(text: str, context: _SplitContext) -> list[tuple[int, in
             continue
         candidates.append(_BoundaryCandidate(start, end, _PRIORITY_BLANK_LINE))
 
+    for match in _SINGLE_NEWLINE_BOUNDARY_PATTERN.finditer(text):
+        start, end = match.span()
+        if not _starts_like_sentence_start(text, end):
+            continue
+        if not context.boundary_allowed(start, end):
+            continue
+        candidates.append(_BoundaryCandidate(start, end, _PRIORITY_BLANK_LINE))
+
     return _select_boundaries(candidates)
 
 
@@ -201,6 +236,16 @@ def _starts_like_sentence_start(text: str, pos: int) -> bool:
     if ch in _OPENING_QUOTES_BRACKETS:
         return True
     return unicodedata.category(ch) in _SENTENCE_START_CATEGORIES
+
+
+def _preceded_by_abbreviation(text: str, punct_pos: int) -> bool:
+    """Check if the period at punct_pos is part of a known abbreviation."""
+    end = punct_pos + 1
+    start = punct_pos - 1
+    while start >= 0 and not text[start].isspace():
+        start -= 1
+    start += 1
+    return text[start:end] in _KNOWN_ABBREVIATIONS
 
 
 def _entity_ends_at(text: str, boundary_start: int) -> bool:
@@ -632,7 +677,7 @@ def _has_terminal_ending(span_text: str) -> bool:
     stripped = span_text.rstrip()
     if not stripped:
         return False
-    return re.search(rf"[.!?\u2026](?:[{_CLOSING}])?$", stripped) is not None
+    return re.search(rf"[.!?\u2026](?:[{_CLOSING}])*$", stripped) is not None
 
 
 def _starts_with_list_marker(span_text: str) -> bool:

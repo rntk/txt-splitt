@@ -239,6 +239,57 @@ class TestClosingQuoteBoundary:
         assert result[0].text == "He trailed off\u2026"
         assert result[1].text == "Then she spoke."
 
+    def test_multiple_closing_chars(self) -> None:
+        splitter = SparseRegexSentenceSplitter(anchor_every_words=24)
+        text = 'He said "done.") Next thing.'
+        result = splitter.split(text)
+        assert len(result) == 2
+
+
+class TestAbbreviationHandling:
+    def _splitter(self) -> SparseRegexSentenceSplitter:
+        return SparseRegexSentenceSplitter(anchor_every_words=24)
+
+    def test_dr_does_not_split(self) -> None:
+        text = "Dr. Smith went home. He was tired."
+        result = self._splitter().split(text)
+        assert len(result) == 2
+        assert result[0].text.startswith("Dr.")
+
+    def test_mr_does_not_split(self) -> None:
+        text = "Mr. Jones arrived. The meeting began."
+        result = self._splitter().split(text)
+        assert len(result) == 2
+        assert result[0].text.startswith("Mr.")
+
+    def test_etc_does_not_split(self) -> None:
+        # etc. should not split; the whole phrase becomes one sentence
+        text = "Items include hats, coats, etc. The list is long."
+        result = self._splitter().split(text)
+        assert len(result) == 1
+        assert "etc." in result[0].text
+
+    def test_real_period_still_splits(self) -> None:
+        text = "The doctor arrived. She examined the patient."
+        result = self._splitter().split(text)
+        assert len(result) == 2
+
+
+class TestNewlineUppercaseBoundary:
+    def _splitter(self) -> SparseRegexSentenceSplitter:
+        return SparseRegexSentenceSplitter(anchor_every_words=24)
+
+    def test_newline_uppercase_splits(self) -> None:
+        # Each part has enough words to survive _merge_short_nonterminal_spans
+        text = "The first sentence lacks punctuation\nThe second sentence starts here"
+        result = self._splitter().split(text)
+        assert len(result) == 2
+
+    def test_newline_lowercase_no_split(self) -> None:
+        text = "First line here\nsecond continues"
+        result = self._splitter().split(text)
+        assert len(result) == 1
+
 
 class TestEmDashNotSplitting:
     def test_em_dash_parenthetical_not_split(self) -> None:
