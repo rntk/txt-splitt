@@ -202,6 +202,8 @@ def generate_html_report(
         "data-tab='json'>Pipeline JSON</button>",
         "                <button class='report-tab-button' "
         "data-tab='trace'>Trace</button>",
+        "                <button class='report-tab-button' "
+        "data-tab='original'>Original File</button>",
         "            </div>",
         "            <div class='report-tab-panel active' data-tab-panel='json'>",
         f"                <pre><code>{escape(json_payload)}</code></pre>",
@@ -210,6 +212,9 @@ def generate_html_report(
         "                <pre><code>"
         f"{escape(trace_output if trace_output is not None else 'Trace disabled')}"
         "</code></pre>",
+        "            </div>",
+        "            <div class='report-tab-panel' data-tab-panel='original'>",
+        f"                <pre><code>{escape(source_text)}</code></pre>",
         "            </div>",
         "        </div>",
         "    </div>",
