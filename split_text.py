@@ -527,6 +527,12 @@ def main() -> None:
         action="store_true",
         help="Also cache requests with non-zero temperature",
     )
+    parser.add_argument(
+        "--json",
+        dest="use_json",
+        action="store_true",
+        help="Use JSON output mode for LLM responses (may improve parsing reliability)",
+    )
     args = parser.parse_args()
 
     if args.use_async:
@@ -607,6 +613,9 @@ def create_pipeline(
             )
         )
 
+    output_mode = "json" if getattr(args, "use_json", False) else "text"
+    parser_mode = "json" if output_mode == "json" else "text"
+
     if args.single_stage:
         return Pipeline(
             splitter=splitter,
@@ -615,8 +624,9 @@ def create_pipeline(
                 client=topic_range_llm,
                 temperature=args.temperature,
                 chunker=OverlapChunker(max_chars=args.max_chunk_chars),
+                output_mode=output_mode,
             ),
-            parser=TopicRangeParser(),
+            parser=TopicRangeParser(input_mode=parser_mode),
             gap_handler=LLMRepairingGapHandler(
                 gap_repair_llm,
                 temperature=args.temperature,
@@ -661,9 +671,10 @@ def create_pipeline(
                 temperature=args.temperature,
                 chunker=OverlapChunker(max_chars=args.max_chunk_chars),
                 max_concurrent_requests=max_concurrent_requests,
+                output_mode=output_mode,
                 tracer=tracer,
             ),
-            parser=TopicRangeParser(),
+            parser=TopicRangeParser(input_mode=parser_mode),
             gap_handler=LLMRepairingGapHandler(
                 gap_repair_llm,
                 temperature=args.temperature,
