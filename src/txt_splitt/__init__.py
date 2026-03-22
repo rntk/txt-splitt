@@ -68,7 +68,7 @@ from txt_splitt.protocols import (
     SentenceSplitter,
     TopicExtractor,
 )
-from txt_splitt.retry import RetryingLLMCallable
+from txt_splitt.retry import RetryConfig, RetryingLLMCallable
 from txt_splitt.splitters import SparseRegexSentenceSplitter
 from txt_splitt.text_optimizers import (
     OptimizingMarker,
@@ -171,6 +171,7 @@ __all__ = [
     "TopicRangeLLM",
     "TopicRangeParser",
     # Retry
+    "RetryConfig",
     "RetryingLLMCallable",
     # Tracing
     "NoOpSpan",

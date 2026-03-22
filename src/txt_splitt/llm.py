@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Literal
 
 from txt_splitt.errors import LLMError
 from txt_splitt.protocols import AsyncLLMCallable, LLMCallable
+from txt_splitt.retry import RetryPolicy, execute_with_retry
 from txt_splitt.tracer import NoOpTracer
 from txt_splitt.types import MarkedText
 
@@ -30,6 +31,7 @@ class TopicRangeLLM:
         chunker: MarkedTextChunker | None = None,
         output_mode: Literal["text", "json"] = "text",
         max_response_chars: int = 50_000,
+        retry_policy: RetryPolicy | None = None,
     ) -> None:
         if output_mode not in {"text", "json"}:
             msg = f"output_mode must be 'text' or 'json', got {output_mode!r}"
@@ -42,6 +44,7 @@ class TopicRangeLLM:
         self._chunker = chunker
         self._output_mode = output_mode
         self._max_response_chars = max_response_chars
+        self._retry_policy = retry_policy
 
     @property
     def response_format(self) -> Literal["text", "json"]:
@@ -66,26 +69,29 @@ class TopicRangeLLM:
         else:
             prompt = _build_topic_ranges_prompt(marked_text.tagged_text)
 
-        try:
-            response = self._client.call(prompt, temperature=self._temperature)
-        except LLMError:
-            raise
-        except Exception as e:
-            raise LLMError(f"LLM call failed: {e}") from e
+        def _call(p: str, t: float) -> str:
+            try:
+                response = self._client.call(p, temperature=t)
+            except LLMError:
+                raise
+            except Exception as e:
+                raise LLMError(f"LLM call failed: {e}") from e
 
-        if not response or not response.strip():
-            raise LLMError("Empty LLM response")
+            if not response or not response.strip():
+                raise LLMError("Empty LLM response")
 
-        cleaned = response.strip()
-        if len(cleaned) > self._max_response_chars:
-            raise LLMError(
-                "LLM response too large: "
-                f"{len(cleaned)} characters exceeds limit {self._max_response_chars}"
-            )
-        if _looks_repetitive(cleaned):
-            raise LLMError("LLM response appears repetitive or stuck in a loop")
+            cleaned = response.strip()
+            if len(cleaned) > self._max_response_chars:
+                raise LLMError(
+                    "LLM response too large: "
+                    f"{len(cleaned)} characters exceeds limit {self._max_response_chars}"
+                )
+            if _looks_repetitive(cleaned):
+                raise LLMError("LLM response appears repetitive or stuck in a loop")
 
-        return cleaned
+            return cleaned
+
+        return execute_with_retry(_call, prompt, self._temperature, self._retry_policy)
 
 
 class TopicListLLM:
@@ -99,6 +105,7 @@ class TopicListLLM:
         chunker: MarkedTextChunker | None = None,
         max_response_chars: int = 50_000,
         tracer: Tracer | None = None,
+        retry_policy: RetryPolicy | None = None,
     ) -> None:
         if max_response_chars <= 0:
             msg = f"max_response_chars must be > 0, got {max_response_chars}"
@@ -108,6 +115,7 @@ class TopicListLLM:
         self._chunker = chunker
         self._max_response_chars = max_response_chars
         self._tracer = tracer if tracer is not None else NoOpTracer()
+        self._retry_policy = retry_policy
 
     def extract(self, marked_text: MarkedText) -> list[str]:
         with self._tracer.span("topic_list_llm.extract") as span:
@@ -137,26 +145,29 @@ class TopicListLLM:
     def _extract_single(self, marked_text: MarkedText) -> str:
         prompt = _build_topic_list_prompt(marked_text.tagged_text)
 
-        try:
-            response = self._client.call(prompt, temperature=self._temperature)
-        except LLMError:
-            raise
-        except Exception as e:
-            raise LLMError(f"LLM call failed: {e}") from e
+        def _call(p: str, t: float) -> str:
+            try:
+                response = self._client.call(p, temperature=t)
+            except LLMError:
+                raise
+            except Exception as e:
+                raise LLMError(f"LLM call failed: {e}") from e
 
-        if not response or not response.strip():
-            raise LLMError("Empty LLM response")
+            if not response or not response.strip():
+                raise LLMError("Empty LLM response")
 
-        cleaned = response.strip()
-        if len(cleaned) > self._max_response_chars:
-            raise LLMError(
-                "LLM response too large: "
-                f"{len(cleaned)} characters exceeds limit {self._max_response_chars}"
-            )
-        if _looks_repetitive(cleaned):
-            raise LLMError("LLM response appears repetitive or stuck in a loop")
+            cleaned = response.strip()
+            if len(cleaned) > self._max_response_chars:
+                raise LLMError(
+                    "LLM response too large: "
+                    f"{len(cleaned)} characters exceeds limit {self._max_response_chars}"
+                )
+            if _looks_repetitive(cleaned):
+                raise LLMError("LLM response appears repetitive or stuck in a loop")
 
-        return cleaned
+            return cleaned
+
+        return execute_with_retry(_call, prompt, self._temperature, self._retry_policy)
 
 
 class TopicRangeAssignmentLLM:
@@ -181,6 +192,7 @@ class TopicRangeAssignmentLLM:
         max_response_chars: int = 50_000,
         max_concurrent_requests: int = 10,
         tracer: Tracer | None = None,
+        retry_policy: RetryPolicy | None = None,
     ) -> None:
         if output_mode not in {"text", "json"}:
             msg = f"output_mode must be 'text' or 'json', got {output_mode!r}"
@@ -199,6 +211,7 @@ class TopicRangeAssignmentLLM:
         self._max_concurrent_requests = max_concurrent_requests
         self._is_async = inspect.iscoroutinefunction(client.call)
         self._tracer = tracer if tracer is not None else NoOpTracer()
+        self._retry_policy = retry_policy
 
     @property
     def response_format(self) -> Literal["text", "json"]:
@@ -349,31 +362,61 @@ class TopicRangeAssignmentLLM:
 
     def _call_for_topic_sync(self, prompt: str) -> str | None:
         """Call sync LLM for a single topic and return cleaned ranges, or ``None``."""
-        try:
-            response: str = self._client.call(  # type: ignore[assignment]
-                prompt, temperature=self._temperature
-            )
-        except LLMError:
-            raise
-        except Exception as e:
-            raise LLMError(f"LLM call failed: {e}") from e
-        return self._validate_response(response)
+        cur_prompt, cur_temp = prompt, self._temperature
+        attempt = 0
+        while True:
+            try:
+                with self._tracer.span("llm.call", prompt=cur_prompt) as call_span:
+                    try:
+                        response: str = self._client.call(  # type: ignore[assignment]
+                            cur_prompt, temperature=cur_temp
+                        )
+                    except LLMError:
+                        raise
+                    except Exception as e:
+                        raise LLMError(f"LLM call failed: {e}") from e
+                    call_span.attributes["response"] = response
+                return self._validate_response(response)
+            except LLMError as exc:
+                if self._retry_policy is None:
+                    raise
+                nxt = self._retry_policy.next(attempt, cur_prompt, cur_temp, exc)
+                if nxt is None:
+                    raise
+                cur_prompt, cur_temp = nxt
+                attempt += 1
 
     async def _call_for_topic_async(self, prompt: str) -> str | None:
         """Call async LLM for a single topic and return cleaned ranges, or ``None``."""
-        try:
-            if self._is_async:
-                response: str = await self._client.call(  # type: ignore[misc]
-                    prompt, temperature=self._temperature
-                )
-            else:
-                # Sync client in async context
-                response = self._client.call(prompt, temperature=self._temperature)  # type: ignore[assignment]
-        except LLMError:
-            raise
-        except Exception as e:
-            raise LLMError(f"LLM call failed: {e}") from e
-        return self._validate_response(response)
+        cur_prompt, cur_temp = prompt, self._temperature
+        attempt = 0
+        while True:
+            try:
+                with self._tracer.span("llm.call", prompt=cur_prompt) as call_span:
+                    try:
+                        if self._is_async:
+                            response: str = await self._client.call(  # type: ignore[misc]
+                                cur_prompt, temperature=cur_temp
+                            )
+                        else:
+                            # Sync client in async context
+                            response = self._client.call(  # type: ignore[assignment]
+                                cur_prompt, temperature=cur_temp
+                            )
+                    except LLMError:
+                        raise
+                    except Exception as e:
+                        raise LLMError(f"LLM call failed: {e}") from e
+                    call_span.attributes["response"] = response
+                return self._validate_response(response)
+            except LLMError as exc:
+                if self._retry_policy is None:
+                    raise
+                nxt = self._retry_policy.next(attempt, cur_prompt, cur_temp, exc)
+                if nxt is None:
+                    raise
+                cur_prompt, cur_temp = nxt
+                attempt += 1
 
     def _validate_response(self, response: str) -> str | None:
         """Validate and clean LLM response. Returns None if invalid/empty."""
@@ -552,6 +595,12 @@ SENTENCE RULES:
 - Be granular: separate distinct stories/topics into their own keyword groups
 - Consecutive markers that continue one idea should stay in the same group even
   if split by newline formatting
+- Prefer fewer, broader topic groups over many narrow ones. A topic group
+  should typically span at least 3-5 consecutive sentences.
+- Do NOT create separate topics for: image captions, figure references,
+  transitional phrases (e.g., "Feel free to skip it", "Let's move on"),
+  meta-commentary about the text structure, or single standalone sentences.
+  Merge these into the surrounding topic instead.
 
 <content>
 {tagged_text}
@@ -713,6 +762,10 @@ SPECIFICITY BALANCE:
 - Specific aspect → add another ">" level: "PostgreSQL>Indexing", "Python>Asyncio"
 - Don't over-specify: "React>Hooks" not "React hooks useState optimization patterns"
 - Do NOT use ":" inside topic path segments.
+- Prefer fewer, broader topics. Each topic should cover a meaningful section
+  of the text (typically 3-5+ sentences). Do NOT create topics for image
+  captions, figure references, transitional phrases, or meta-commentary —
+  these will be merged into adjacent topics automatically.
 
 OUTPUT FORMAT (exactly one topic per line, NO sentence ranges):
 CategoryLevel1>CategoryLevel2>...>SpecificTopic
@@ -772,6 +825,9 @@ SENTENCE RULES:
 - Be granular: only include sentences that genuinely belong to this topic
 - Consecutive markers that continue one idea should stay together even
   if split by newline formatting
+- Include transitional, connective, or short generic sentences that appear
+  within or immediately adjacent to this topic's content (e.g., "Feel free
+  to skip it", figure captions, meta-commentary). Do not leave them unassigned.
 
 <content>
 {tagged_text}

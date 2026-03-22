@@ -55,7 +55,6 @@ class Tracer:
 
     def __init__(self) -> None:
         self._root_spans: list[Span] = []
-        self._stack: list[Span] = []
 
     @property
     def spans(self) -> list[Span]:
@@ -64,17 +63,22 @@ class Tracer:
 
     @contextmanager
     def span(self, name: str, **attributes: Any) -> Generator[Span, None, None]:
-        """Create a timed span. Nests automatically via internal stack."""
+        """Create a timed span. Nests automatically via the task-local active span.
+
+        Parent detection uses the ``_ACTIVE_SPAN`` ContextVar, which is
+        task-local in asyncio, so concurrent coroutines nest correctly even
+        when running under :func:`asyncio.gather`.
+        """
         s = Span(
             name=name,
             start_time=time.monotonic(),
             attributes=dict(attributes),
         )
-        if self._stack:
-            self._stack[-1].children.append(s)
+        parent = _ACTIVE_SPAN.get()
+        if isinstance(parent, Span):
+            parent.children.append(s)
         else:
             self._root_spans.append(s)
-        self._stack.append(s)
 
         token = _ACTIVE_SPAN.set(s)
         try:
@@ -82,7 +86,6 @@ class Tracer:
         finally:
             _ACTIVE_SPAN.reset(token)
             s.end_time = time.monotonic()
-            self._stack.pop()
 
     def format(self) -> str:
         """Format all collected spans as an indented text tree."""

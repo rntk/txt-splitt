@@ -1,5 +1,6 @@
 """Unit tests for the LLM stage."""
 
+import asyncio
 import json
 from typing import Literal, cast
 from unittest.mock import MagicMock
@@ -8,6 +9,7 @@ import pytest
 
 from txt_splitt.errors import LLMError
 from txt_splitt.llm import TopicListLLM, TopicRangeAssignmentLLM, TopicRangeLLM
+from txt_splitt.retry import RetryConfig
 from txt_splitt.tracer import Tracer
 from txt_splitt.types import MarkedText
 
@@ -775,3 +777,217 @@ class TestTopicRangeAssignmentLLM:
 
         with pytest.raises(RuntimeError, match="Cannot use assign.*async client"):
             llm.assign(mt, ["Technology>AI"])
+
+
+class TestRetryConfig:
+    def test_max_attempts_zero_raises(self) -> None:
+        with pytest.raises(ValueError, match="max_attempts must be >= 1"):
+            RetryConfig(max_attempts=0)
+
+    def test_next_returns_none_when_exhausted(self) -> None:
+        policy = RetryConfig(max_attempts=2)
+        assert policy.next(2, "p", 0.0, LLMError("x")) is None
+
+    def test_next_returns_same_params_by_default(self) -> None:
+        policy = RetryConfig(max_attempts=3)
+        result = policy.next(0, "my prompt", 0.5, LLMError("x"))
+        assert result == ("my prompt", 0.5)
+
+    def test_temperature_schedule_applied(self) -> None:
+        policy = RetryConfig(max_attempts=3, temperature_schedule=[0.2, 0.7])
+        assert policy.next(0, "p", 0.0, LLMError("x")) == ("p", 0.2)
+        assert policy.next(1, "p", 0.0, LLMError("x")) == ("p", 0.7)
+        # Beyond schedule length: falls back to passed temperature
+        assert policy.next(2, "p", 0.0, LLMError("x")) == ("p", 0.0)
+
+    def test_prompt_modifier_applied(self) -> None:
+        policy = RetryConfig(
+            max_attempts=3,
+            prompt_modifier=lambda p, attempt: f"{p} retry={attempt}",
+        )
+        result = policy.next(1, "base", 0.0, LLMError("x"))
+        assert result == ("base retry=1", 0.0)
+
+    def test_both_modifiers_combined(self) -> None:
+        policy = RetryConfig(
+            max_attempts=2,
+            temperature_schedule=[0.9],
+            prompt_modifier=lambda p, _: p + " HINT",
+        )
+        result = policy.next(0, "original", 0.0, LLMError("x"))
+        assert result == ("original HINT", 0.9)
+
+
+class TestTopicRangeLLMWithRetry:
+    def test_retries_on_empty_response(self) -> None:
+        client = MagicMock()
+        client.call.side_effect = ["", "Technology>AI: 0-2"]
+        policy = RetryConfig(max_attempts=1)
+        llm = TopicRangeLLM(client, retry_policy=policy)
+
+        mt = MarkedText(tagged_text="{0} AI is fast.", sentence_count=1)
+        result = llm.query(mt)
+
+        assert result == "Technology>AI: 0-2"
+        assert client.call.call_count == 2
+
+    def test_raises_after_max_attempts_exhausted(self) -> None:
+        client = MagicMock()
+        client.call.return_value = ""
+        policy = RetryConfig(max_attempts=2)
+        llm = TopicRangeLLM(client, retry_policy=policy)
+
+        mt = MarkedText(tagged_text="{0} Text", sentence_count=1)
+        with pytest.raises(LLMError, match="Empty LLM response"):
+            llm.query(mt)
+
+        assert client.call.call_count == 3  # 1 initial + 2 retries
+
+    def test_temperature_schedule_forwarded_on_retry(self) -> None:
+        client = MagicMock()
+        client.call.side_effect = ["", "Technology>AI: 0"]
+        policy = RetryConfig(max_attempts=1, temperature_schedule=[0.9])
+        llm = TopicRangeLLM(client, retry_policy=policy)
+
+        mt = MarkedText(tagged_text="{0} Text", sentence_count=1)
+        llm.query(mt)
+
+        first_temp = client.call.call_args_list[0][1]["temperature"]
+        retry_temp = client.call.call_args_list[1][1]["temperature"]
+        assert first_temp == 0.0
+        assert retry_temp == 0.9
+
+    def test_prompt_modifier_applied_on_retry(self) -> None:
+        client = MagicMock()
+        client.call.side_effect = ["", "Technology>AI: 0"]
+        policy = RetryConfig(
+            max_attempts=1,
+            prompt_modifier=lambda p, _: p + " RETRY_HINT",
+        )
+        llm = TopicRangeLLM(client, retry_policy=policy)
+
+        mt = MarkedText(tagged_text="{0} Text", sentence_count=1)
+        llm.query(mt)
+
+        retry_prompt = client.call.call_args_list[1][0][0]
+        assert retry_prompt.endswith(" RETRY_HINT")
+
+    def test_no_retry_without_policy(self) -> None:
+        client = MagicMock()
+        client.call.return_value = ""
+        llm = TopicRangeLLM(client)  # no retry_policy
+
+        mt = MarkedText(tagged_text="{0} Text", sentence_count=1)
+        with pytest.raises(LLMError, match="Empty LLM response"):
+            llm.query(mt)
+
+        assert client.call.call_count == 1
+
+
+class TestTopicListLLMWithRetry:
+    def test_retries_on_empty_response(self) -> None:
+        client = MagicMock()
+        client.call.side_effect = ["", "Technology>AI>GPT-4"]
+        policy = RetryConfig(max_attempts=1)
+        llm = TopicListLLM(client, retry_policy=policy)
+
+        mt = MarkedText(tagged_text="{0} Text", sentence_count=1)
+        result = llm.extract(mt)
+
+        assert result == ["Technology>AI>GPT-4"]
+        assert client.call.call_count == 2
+
+    def test_raises_after_max_attempts_exhausted(self) -> None:
+        client = MagicMock()
+        client.call.return_value = ""
+        policy = RetryConfig(max_attempts=2)
+        llm = TopicListLLM(client, retry_policy=policy)
+
+        mt = MarkedText(tagged_text="{0} Text", sentence_count=1)
+        with pytest.raises(LLMError, match="Empty LLM response"):
+            llm.extract(mt)
+
+        assert client.call.call_count == 3  # 1 initial + 2 retries
+
+
+class TestTopicRangeAssignmentLLMWithRetry:
+    def test_retries_on_oversized_response(self) -> None:
+        client = MagicMock()
+        client.call.side_effect = ["x" * 101, "0-2"]
+        policy = RetryConfig(max_attempts=1)
+        llm = TopicRangeAssignmentLLM(client, max_response_chars=100, retry_policy=policy)
+
+        mt = MarkedText(tagged_text="{0} Text", sentence_count=1)
+        result = llm.assign(mt, ["Technology>AI"])
+
+        assert result == "Technology>AI: 0-2"
+        assert client.call.call_count == 2
+
+    def test_raises_after_max_attempts_exhausted(self) -> None:
+        client = MagicMock()
+        client.call.return_value = "x" * 101
+        policy = RetryConfig(max_attempts=2)
+        llm = TopicRangeAssignmentLLM(client, max_response_chars=100, retry_policy=policy)
+
+        mt = MarkedText(tagged_text="{0} Text", sentence_count=1)
+        with pytest.raises(LLMError, match="LLM response too large"):
+            llm.assign(mt, ["Technology>AI"])
+
+        assert client.call.call_count == 3  # 1 initial + 2 retries
+
+    def test_empty_none_response_skipped_without_retry(self) -> None:
+        """NONE/empty responses are valid (no sentences for topic) and never retried."""
+        client = MagicMock()
+        client.call.side_effect = ["NONE", "3-5"]
+        policy = RetryConfig(max_attempts=3)
+        llm = TopicRangeAssignmentLLM(client, retry_policy=policy)
+
+        mt = MarkedText(tagged_text="{0} Text", sentence_count=1)
+        result = llm.assign(mt, ["Technology>AI", "Sport>Football"])
+
+        assert result == "Sport>Football: 3-5"
+        assert client.call.call_count == 2  # no retry triggered for NONE
+
+    def test_async_retries_on_oversized_response(self) -> None:
+        call_count = 0
+
+        class AsyncClient:
+            async def call(self, prompt: str, temperature: float) -> str:
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    return "x" * 101
+                return "0-2"
+
+        async def run_test() -> None:
+            client = AsyncClient()
+            policy = RetryConfig(max_attempts=1)
+            llm = TopicRangeAssignmentLLM(
+                client, max_response_chars=100, retry_policy=policy
+            )
+            mt = MarkedText(tagged_text="{0} Text", sentence_count=1)
+            result = await llm.assign_async(mt, ["Technology>AI"])
+            assert result == "Technology>AI: 0-2"
+            assert call_count == 2
+
+        asyncio.run(run_test())
+
+    def test_temperature_schedule_forwarded_on_retry(self) -> None:
+        received_temps: list[float] = []
+
+        client = MagicMock()
+
+        def side_effect(prompt: str, temperature: float) -> str:
+            received_temps.append(temperature)
+            if len(received_temps) == 1:
+                return "x" * 101  # triggers LLMError on first call
+            return "0-2"
+
+        client.call.side_effect = side_effect
+        policy = RetryConfig(max_attempts=1, temperature_schedule=[0.8])
+        llm = TopicRangeAssignmentLLM(client, max_response_chars=100, retry_policy=policy)
+
+        mt = MarkedText(tagged_text="{0} Text", sentence_count=1)
+        llm.assign(mt, ["Technology>AI"])
+
+        assert received_temps == [0.0, 0.8]

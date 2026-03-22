@@ -8,7 +8,7 @@ import sys
 from datetime import datetime
 from html import escape
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 # Add src to path so we can import txt_splitt when running from root
 sys.path.append(str(Path(__file__).parent / "src"))
@@ -26,6 +26,7 @@ from txt_splitt import (
     OptimizingMarker,
     OverlapChunker,
     Pipeline,
+    RetryConfig,
     RetryingLLMCallable,
     ShortSentenceEnhancer,
     SparseRegexSentenceSplitter,
@@ -613,8 +614,16 @@ def create_pipeline(
             )
         )
 
-    output_mode = "json" if getattr(args, "use_json", False) else "text"
-    parser_mode = "json" if output_mode == "json" else "text"
+    output_mode: Literal["text", "json"] = "json" if getattr(args, "use_json", False) else "text"
+    parser_mode: Literal["text", "json", "auto"] = "json" if output_mode == "json" else "text"
+    retry_policy = RetryConfig(
+        max_attempts=3,
+        temperature_schedule=[
+            args.temperature + 0.1,
+            args.temperature + 0.3,
+            args.temperature + 0.5,
+        ],
+    )
 
     if args.single_stage:
         return Pipeline(
@@ -625,6 +634,7 @@ def create_pipeline(
                 temperature=args.temperature,
                 chunker=OverlapChunker(max_chars=args.max_chunk_chars),
                 output_mode=output_mode,
+                retry_policy=retry_policy,
             ),
             parser=TopicRangeParser(input_mode=parser_mode),
             gap_handler=LLMRepairingGapHandler(
@@ -665,6 +675,7 @@ def create_pipeline(
                 temperature=args.temperature,
                 chunker=OverlapChunker(max_chars=args.max_chunk_chars),
                 tracer=tracer,
+                retry_policy=retry_policy,
             ),
             range_assigner=TopicRangeAssignmentLLM(
                 client=range_assigner_client,
@@ -673,6 +684,7 @@ def create_pipeline(
                 max_concurrent_requests=max_concurrent_requests,
                 output_mode=output_mode,
                 tracer=tracer,
+                retry_policy=retry_policy,
             ),
             parser=TopicRangeParser(input_mode=parser_mode),
             gap_handler=LLMRepairingGapHandler(
