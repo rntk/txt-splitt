@@ -1,6 +1,6 @@
 """txt_splitt package."""
 
-from txt_splitt import keywords, sentences
+from txt_splitt import insights, keywords, sentences
 from txt_splitt.cache import (
     AsyncLLMCacheStore,
     CacheEntry,
@@ -72,6 +72,7 @@ __all__ = [
     "Tracer",
     "TracingAsyncLLMCallable",
     "TracingLLMCallable",
+    "insights",
     "keywords",
     "sentences",
 ]

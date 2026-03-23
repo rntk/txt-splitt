@@ -96,7 +96,7 @@ def build_pipeline(
         state_builder=_KeywordStateBuilder(),
         postprocessors=processors,
         result_factory=_KeywordResultFactory(),
-        count_resolver=lambda marked, items: _resolve_count(marked, items),
+        count_resolver=_resolve_count,
         html_cleaner=html_cleaner,
         offset_restorer=offset_restorer,
         tracer=tracer,

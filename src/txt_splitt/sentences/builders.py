@@ -23,7 +23,7 @@ if TYPE_CHECKING:
         SentenceSplitter,
         TopicExtractor,
     )
-    from txt_splitt.tracer import NoOpTracer, Tracer
+    from txt_splitt.tracer import Tracer
 
 
 @dataclass(frozen=True, slots=True)
