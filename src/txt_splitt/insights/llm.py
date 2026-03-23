@@ -90,7 +90,10 @@ REQUIRED ALGORITHM (follow this exactly):
 
 NAMING RULES:
 - Give each insight a short, specific name (3-8 words).
-- Be specific: "Claude favors own text in review" not "AI bias".
+- Be specific: "A model favors own text in review" not "AI bias".
+- CONSOLIDATE: If the exact same fact is supported by multiple non-contiguous
+  parts of the text (e.g., sentence 5 and sentence 20), output them as a SINGLE
+  insight with multiple ranges, rather than creating duplicate insights.
 - If the same fact appears in different parts of the text, reuse the EXACT same
   name so occurrences can be merged.
 - Use plain prose names.
@@ -99,6 +102,10 @@ QUANTITY:
 - Extract 5-20 insights total. Quality over quantity.
 - Only extract genuinely noteworthy facts.
 - It is fine to extract fewer than 5 if the text has few interesting facts.
+- If the text contains purely boilerplate, transitional, or uninteresting content,
+  it is perfectly acceptable to extract 0 insights.
+- If 0 insights are found, output an empty JSON array `{{"insights": []}}` (or literally
+  just the word "NONE" if in text mode).
 
 CONCISENESS RULES (CRITICAL FOR PERFORMANCE):
 - Do NOT copy or quote exact sentences from the input text in your reasoning or output.
@@ -116,8 +123,8 @@ SentenceRanges can be:
 
 Examples:
 Context Compaction Threshold at 50K Tokens: 12-14, 45-46
-Model Self-Favoritism in Review Tasks: 78-80
-Thinking Mode Hurts BrowseComp Performance: 200-201
+Q3 Revenue Dropped 14% Due to Supply Chain: 8-9
+Patient Exhibits Rare Allergic Reaction to Amoxicillin: 102
 
 <content>
 {tagged_text}
