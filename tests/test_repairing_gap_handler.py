@@ -3,8 +3,8 @@
 import pytest
 
 from txt_splitt.errors import GapError
-from txt_splitt.gap_handlers import RepairingGapHandler
-from txt_splitt.types import SentenceGroup, SentenceRange
+from txt_splitt.sentences.gap_handlers import RepairingGapHandler
+from txt_splitt.sentences.types import SentenceGroup, SentenceRange
 
 
 class TestRepairingGapHandler:

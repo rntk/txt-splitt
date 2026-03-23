@@ -8,10 +8,14 @@ from unittest.mock import MagicMock
 import pytest
 
 from txt_splitt.errors import LLMError
-from txt_splitt.llm import TopicListLLM, TopicRangeAssignmentLLM, TopicRangeLLM
 from txt_splitt.retry import RetryConfig
+from txt_splitt.sentences.llm import (
+    TopicListLLM,
+    TopicRangeAssignmentLLM,
+    TopicRangeLLM,
+)
+from txt_splitt.sentences.types import MarkedText
 from txt_splitt.tracer import Tracer
-from txt_splitt.types import MarkedText
 
 
 class TestTopicRangeLLM:
@@ -915,7 +919,11 @@ class TestTopicRangeAssignmentLLMWithRetry:
         client = MagicMock()
         client.call.side_effect = ["x" * 101, "0-2"]
         policy = RetryConfig(max_attempts=1)
-        llm = TopicRangeAssignmentLLM(client, max_response_chars=100, retry_policy=policy)
+        llm = TopicRangeAssignmentLLM(
+            client,
+            max_response_chars=100,
+            retry_policy=policy,
+        )
 
         mt = MarkedText(tagged_text="{0} Text", sentence_count=1)
         result = llm.assign(mt, ["Technology>AI"])
@@ -927,7 +935,11 @@ class TestTopicRangeAssignmentLLMWithRetry:
         client = MagicMock()
         client.call.return_value = "x" * 101
         policy = RetryConfig(max_attempts=2)
-        llm = TopicRangeAssignmentLLM(client, max_response_chars=100, retry_policy=policy)
+        llm = TopicRangeAssignmentLLM(
+            client,
+            max_response_chars=100,
+            retry_policy=policy,
+        )
 
         mt = MarkedText(tagged_text="{0} Text", sentence_count=1)
         with pytest.raises(LLMError, match="LLM response too large"):
@@ -985,7 +997,11 @@ class TestTopicRangeAssignmentLLMWithRetry:
 
         client.call.side_effect = side_effect
         policy = RetryConfig(max_attempts=1, temperature_schedule=[0.8])
-        llm = TopicRangeAssignmentLLM(client, max_response_chars=100, retry_policy=policy)
+        llm = TopicRangeAssignmentLLM(
+            client,
+            max_response_chars=100,
+            retry_policy=policy,
+        )
 
         mt = MarkedText(tagged_text="{0} Text", sentence_count=1)
         llm.assign(mt, ["Technology>AI"])

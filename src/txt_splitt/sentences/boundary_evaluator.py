@@ -2,7 +2,7 @@
 
 from txt_splitt.errors import EnhancerError
 from txt_splitt.protocols import LLMCallable
-from txt_splitt.types import Sentence, SentenceGroup, _indices_to_ranges
+from txt_splitt.sentences.types import Sentence, SentenceGroup, _indices_to_ranges
 
 
 class BoundaryEvaluator:
@@ -223,5 +223,3 @@ def _parse_boundary_response(response: str, max_shift: int) -> tuple[str, int]:
             # No valid number → treat as correct
             return ("correct", 0)
     return ("correct", 0)
-
-

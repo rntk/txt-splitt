@@ -2,15 +2,15 @@
 
 import pytest
 
-from txt_splitt.normalizers import (
+from txt_splitt.sentences.normalizers import (
     NormalizingSplitter,
     _find_split_point,
     _merge_short,
     _reindex,
     _split_long,
 )
-from txt_splitt.splitters import SparseRegexSentenceSplitter
-from txt_splitt.types import Sentence
+from txt_splitt.sentences.splitters import SparseRegexSentenceSplitter
+from txt_splitt.sentences.types import Sentence
 
 # ---------------------------------------------------------------------------
 # Helpers

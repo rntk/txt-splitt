@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from txt_splitt.keyword_types import Word
+from txt_splitt.keywords.types import Word
 
 _WORD_RE = re.compile(r"\S+")
 

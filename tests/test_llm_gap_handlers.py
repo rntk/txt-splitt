@@ -5,9 +5,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from txt_splitt.errors import GapError
-from txt_splitt.gap_handlers import LLMRepairingGapHandler
+from txt_splitt.sentences.gap_handlers import LLMRepairingGapHandler
+from txt_splitt.sentences.types import Sentence, SentenceGroup, SentenceRange
 from txt_splitt.tracer import Tracer
-from txt_splitt.types import Sentence, SentenceGroup, SentenceRange
 
 
 def _make_sentences(n: int) -> list[Sentence]:

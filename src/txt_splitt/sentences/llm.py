@@ -1,22 +1,24 @@
 """LLM strategy implementations."""
 
+# ruff: noqa: E501
+
 from __future__ import annotations
 
 import asyncio
 import inspect
 import json
-import re
-from collections import Counter
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Literal
 
 from txt_splitt.errors import LLMError
+from txt_splitt.llms.utils import looks_repetitive
 from txt_splitt.protocols import AsyncLLMCallable, LLMCallable
 from txt_splitt.retry import RetryPolicy, execute_with_retry
+from txt_splitt.sentences.types import MarkedText
 from txt_splitt.tracer import NoOpTracer
-from txt_splitt.types import MarkedText
 
 if TYPE_CHECKING:
-    from txt_splitt.protocols import MarkedTextChunker
+    from txt_splitt.sentences.protocols import MarkedTextChunker
     from txt_splitt.tracer import Tracer
 
 
@@ -32,6 +34,7 @@ class TopicRangeLLM:
         output_mode: Literal["text", "json"] = "text",
         max_response_chars: int = 50_000,
         retry_policy: RetryPolicy | None = None,
+        prompt_builder: Callable[[str], str] | None = None,
     ) -> None:
         if output_mode not in {"text", "json"}:
             msg = f"output_mode must be 'text' or 'json', got {output_mode!r}"
@@ -45,6 +48,7 @@ class TopicRangeLLM:
         self._output_mode = output_mode
         self._max_response_chars = max_response_chars
         self._retry_policy = retry_policy
+        self._prompt_builder = prompt_builder
 
     @property
     def response_format(self) -> Literal["text", "json"]:
@@ -65,9 +69,17 @@ class TopicRangeLLM:
 
     def _query_single(self, marked_text: MarkedText) -> str:
         if self._output_mode == "json":
-            prompt = _build_topic_ranges_json_prompt(marked_text.tagged_text)
+            prompt = (
+                self._prompt_builder(marked_text.tagged_text)
+                if self._prompt_builder is not None
+                else _build_topic_ranges_json_prompt(marked_text.tagged_text)
+            )
         else:
-            prompt = _build_topic_ranges_prompt(marked_text.tagged_text)
+            prompt = (
+                self._prompt_builder(marked_text.tagged_text)
+                if self._prompt_builder is not None
+                else _build_topic_ranges_prompt(marked_text.tagged_text)
+            )
 
         def _call(p: str, t: float) -> str:
             try:
@@ -86,7 +98,7 @@ class TopicRangeLLM:
                     "LLM response too large: "
                     f"{len(cleaned)} characters exceeds limit {self._max_response_chars}"
                 )
-            if _looks_repetitive(cleaned):
+            if looks_repetitive(cleaned):
                 raise LLMError("LLM response appears repetitive or stuck in a loop")
 
             return cleaned
@@ -106,6 +118,7 @@ class TopicListLLM:
         max_response_chars: int = 50_000,
         tracer: Tracer | None = None,
         retry_policy: RetryPolicy | None = None,
+        prompt_builder: Callable[[str], str] | None = None,
     ) -> None:
         if max_response_chars <= 0:
             msg = f"max_response_chars must be > 0, got {max_response_chars}"
@@ -116,6 +129,7 @@ class TopicListLLM:
         self._max_response_chars = max_response_chars
         self._tracer = tracer if tracer is not None else NoOpTracer()
         self._retry_policy = retry_policy
+        self._prompt_builder = prompt_builder
 
     def extract(self, marked_text: MarkedText) -> list[str]:
         with self._tracer.span("topic_list_llm.extract") as span:
@@ -143,7 +157,11 @@ class TopicListLLM:
             return all_topics
 
     def _extract_single(self, marked_text: MarkedText) -> str:
-        prompt = _build_topic_list_prompt(marked_text.tagged_text)
+        prompt = (
+            self._prompt_builder(marked_text.tagged_text)
+            if self._prompt_builder is not None
+            else _build_topic_list_prompt(marked_text.tagged_text)
+        )
 
         def _call(p: str, t: float) -> str:
             try:
@@ -162,7 +180,7 @@ class TopicListLLM:
                     "LLM response too large: "
                     f"{len(cleaned)} characters exceeds limit {self._max_response_chars}"
                 )
-            if _looks_repetitive(cleaned):
+            if looks_repetitive(cleaned):
                 raise LLMError("LLM response appears repetitive or stuck in a loop")
 
             return cleaned
@@ -193,6 +211,7 @@ class TopicRangeAssignmentLLM:
         max_concurrent_requests: int = 10,
         tracer: Tracer | None = None,
         retry_policy: RetryPolicy | None = None,
+        prompt_builder: Callable[[str, str], str] | None = None,
     ) -> None:
         if output_mode not in {"text", "json"}:
             msg = f"output_mode must be 'text' or 'json', got {output_mode!r}"
@@ -212,6 +231,7 @@ class TopicRangeAssignmentLLM:
         self._is_async = inspect.iscoroutinefunction(client.call)
         self._tracer = tracer if tracer is not None else NoOpTracer()
         self._retry_policy = retry_policy
+        self._prompt_builder = prompt_builder
 
     @property
     def response_format(self) -> Literal["text", "json"]:
@@ -282,7 +302,11 @@ class TopicRangeAssignmentLLM:
     ) -> str:
         lines: list[str] = []
         for topic in topics:
-            prompt = _build_single_topic_range_prompt(marked_text.tagged_text, topic)
+            prompt = (
+                self._prompt_builder(marked_text.tagged_text, topic)
+                if self._prompt_builder is not None
+                else _build_single_topic_range_prompt(marked_text.tagged_text, topic)
+            )
             ranges_str = self._call_for_topic_sync(prompt)
             if ranges_str is not None:
                 lines.append(f"{topic}: {ranges_str}")
@@ -292,7 +316,11 @@ class TopicRangeAssignmentLLM:
         self, marked_text: MarkedText, topics: list[str]
     ) -> str:
         prompts = [
-            _build_single_topic_range_prompt(marked_text.tagged_text, topic)
+            (
+                self._prompt_builder(marked_text.tagged_text, topic)
+                if self._prompt_builder is not None
+                else _build_single_topic_range_prompt(marked_text.tagged_text, topic)
+            )
             for topic in topics
         ]
         sem = asyncio.Semaphore(self._max_concurrent_requests)
@@ -313,8 +341,13 @@ class TopicRangeAssignmentLLM:
     ) -> str:
         topic_entries: list[dict[str, object]] = []
         for topic in topics:
-            prompt = _build_single_topic_range_json_prompt(
-                marked_text.tagged_text, topic
+            prompt = (
+                self._prompt_builder(marked_text.tagged_text, topic)
+                if self._prompt_builder is not None
+                else _build_single_topic_range_json_prompt(
+                    marked_text.tagged_text,
+                    topic,
+                )
             )
             ranges_str = self._call_for_topic_sync(prompt)
             if ranges_str is None:
@@ -328,7 +361,14 @@ class TopicRangeAssignmentLLM:
         self, marked_text: MarkedText, topics: list[str]
     ) -> str:
         prompts = [
-            _build_single_topic_range_json_prompt(marked_text.tagged_text, topic)
+            (
+                self._prompt_builder(marked_text.tagged_text, topic)
+                if self._prompt_builder is not None
+                else _build_single_topic_range_json_prompt(
+                    marked_text.tagged_text,
+                    topic,
+                )
+            )
             for topic in topics
         ]
         sem = asyncio.Semaphore(self._max_concurrent_requests)
@@ -433,39 +473,10 @@ class TopicRangeAssignmentLLM:
                 f"{len(cleaned)} characters exceeds limit "
                 f"{self._max_response_chars}"
             )
-        if _looks_repetitive(cleaned):
+        if looks_repetitive(cleaned):
             raise LLMError("LLM response appears repetitive or stuck in a loop")
 
         return cleaned
-
-
-_WORD_PATTERN = re.compile(r"[A-Za-z0-9#.+-]+")
-
-
-def _looks_repetitive(response: str) -> bool:
-    words = _WORD_PATTERN.findall(response.lower())
-    if len(words) < 120:
-        return False
-
-    unique_ratio = len(set(words)) / len(words)
-    if unique_ratio < 0.18:
-        return True
-
-    shingle_size = 8
-    if len(words) <= shingle_size:
-        return False
-
-    shingles = [
-        " ".join(words[i : i + shingle_size])
-        for i in range(len(words) - shingle_size + 1)
-    ]
-    counts = Counter(shingles)
-    most_common = counts.most_common(1)
-    if not most_common:
-        return False
-
-    _, freq = most_common[0]
-    return freq >= 12
 
 
 def _build_topic_ranges_prompt(tagged_text: str) -> str:

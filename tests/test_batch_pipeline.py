@@ -2,9 +2,9 @@
 
 import pytest
 
-from txt_splitt.batch_pipeline import BatchPipeline
-from txt_splitt.pipeline import Pipeline
-from txt_splitt.types import (
+from txt_splitt.sentences.batch_pipeline import BatchPipeline
+from txt_splitt.sentences.builders import build_pipeline
+from txt_splitt.sentences.types import (
     MarkedText,
     OffsetMapping,
     OffsetSegment,
@@ -224,7 +224,7 @@ def test_prepare_finalize_matches_pipeline_behavior() -> None:
     marked = MarkedText(tagged_text="{0} A\n{1} B\n{2} C", sentence_count=3)
     llm_response = "Technology>AI: 0-2"
 
-    single = Pipeline(
+    single = build_pipeline(
         splitter=StubSplitter(sentences),
         marker=StubMarker(marked),
         llm=StubLLM(llm_response),

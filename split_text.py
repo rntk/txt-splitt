@@ -14,33 +14,38 @@ from typing import Any, Literal
 sys.path.append(str(Path(__file__).parent / "src"))
 
 from txt_splitt import (
-    AdjacentSameTopicJoiner,
-    BoundaryEvaluator,
-    BracketMarker,
     CachingAsyncLLMCallable,
     CachingLLMCallable,
-    HTMLParserTagStripCleaner,
+    HtmlCleaner,
     LLMCallable,
-    LLMRepairingGapHandler,
-    MappingOffsetRestorer,
-    OptimizingMarker,
-    OverlapChunker,
-    Pipeline,
     RetryConfig,
     RetryingLLMCallable,
-    ShortSentenceEnhancer,
-    SparseRegexSentenceSplitter,
     SQLiteLLMCacheStore,
-    TopicListLLM,
-    TopicRangeAssignmentLLM,
-    TopicRangeLLM,
-    TopicRangeParser,
     Tracer,
     TracingAsyncLLMCallable,
     TracingLLMCallable,
 )
+from txt_splitt.html_cleaners import HTMLParserTagStripCleaner
 from txt_splitt.llms.llamacpp import AsyncLLamaCPP, LLamaCPP
-from txt_splitt.protocols import AsyncLLMCallable, Enhancer
+from txt_splitt.protocols import AsyncLLMCallable
+from txt_splitt.sentences import (
+    AdjacentSameTopicJoiner,
+    BoundaryEvaluator,
+    BracketMarker,
+    LLMRepairingGapHandler,
+    MappingOffsetRestorer,
+    OptimizingMarker,
+    OverlapChunker,
+    SentencePipeline,
+    ShortSentenceEnhancer,
+    SparseRegexSentenceSplitter,
+    TopicListLLM,
+    TopicRangeAssignmentLLM,
+    TopicRangeLLM,
+    TopicRangeParser,
+    build_pipeline,
+)
+from txt_splitt.sentences.protocols import Enhancer
 
 
 class LLamaCPPAdapter:
@@ -549,7 +554,7 @@ def create_pipeline(
     async_llm: AsyncLLMCallable | None = None,
     tracer: Tracer | None = None,
     cache_store: SQLiteLLMCacheStore | None = None,
-) -> Pipeline:
+) -> SentencePipeline:
     """Create pipeline with appropriate configuration."""
     topic_range_llm = wrap_sync_llm(
         sync_llm,
@@ -577,7 +582,7 @@ def create_pipeline(
         long_sentence_word_threshold=args.long_sentence_threshold,
         min_sentence_words=args.min_sentence_words,
     )
-    html_cleaner = None
+    html_cleaner: HtmlCleaner | None = None
     offset_restorer = None
     if input_path.suffix.lower() in {".html", ".htm"}:
         html_cleaner = HTMLParserTagStripCleaner(strip_tags={"style", "script"})
@@ -614,8 +619,12 @@ def create_pipeline(
             )
         )
 
-    output_mode: Literal["text", "json"] = "json" if getattr(args, "use_json", False) else "text"
-    parser_mode: Literal["text", "json", "auto"] = "json" if output_mode == "json" else "text"
+    output_mode: Literal["text", "json"] = (
+        "json" if getattr(args, "use_json", False) else "text"
+    )
+    parser_mode: Literal["text", "json", "auto"] = (
+        "json" if output_mode == "json" else "text"
+    )
     retry_policy = RetryConfig(
         max_attempts=3,
         temperature_schedule=[
@@ -626,7 +635,7 @@ def create_pipeline(
     )
 
     if args.single_stage:
-        return Pipeline(
+        return build_pipeline(
             splitter=splitter,
             marker=OptimizingMarker(BracketMarker()),
             llm=TopicRangeLLM(
@@ -667,7 +676,7 @@ def create_pipeline(
                 tracer=tracer,
                 cache_store=cache_store,
             )
-        return Pipeline(
+        return build_pipeline(
             splitter=splitter,
             marker=OptimizingMarker(BracketMarker()),
             topic_extractor=TopicListLLM(

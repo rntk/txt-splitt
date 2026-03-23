@@ -4,12 +4,17 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from txt_splitt.enhancers import (
+from txt_splitt.errors import EnhancerError
+from txt_splitt.sentences.enhancers import (
     ShortSentenceEnhancer,
     _parse_reassignment_response,
 )
-from txt_splitt.errors import EnhancerError
-from txt_splitt.types import Sentence, SentenceGroup, SentenceRange, _indices_to_ranges
+from txt_splitt.sentences.types import (
+    Sentence,
+    SentenceGroup,
+    SentenceRange,
+    _indices_to_ranges,
+)
 
 
 def _make_sentence(index: int, text: str) -> Sentence:

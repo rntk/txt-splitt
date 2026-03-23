@@ -6,18 +6,20 @@ from typing import cast
 
 from split_text import build_cache_store, create_pipeline, wrap_async_llm, wrap_sync_llm
 from txt_splitt import (
-    BoundaryEvaluator,
     CachingAsyncLLMCallable,
     CachingLLMCallable,
-    LLMRepairingGapHandler,
-    ShortSentenceEnhancer,
     SQLiteLLMCacheStore,
-    TopicListLLM,
-    TopicRangeAssignmentLLM,
-    TopicRangeLLM,
     Tracer,
     TracingAsyncLLMCallable,
     TracingLLMCallable,
+)
+from txt_splitt.sentences import (
+    BoundaryEvaluator,
+    LLMRepairingGapHandler,
+    ShortSentenceEnhancer,
+    TopicListLLM,
+    TopicRangeAssignmentLLM,
+    TopicRangeLLM,
 )
 
 

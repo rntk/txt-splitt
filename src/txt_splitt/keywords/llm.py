@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from txt_splitt.keyword_types import MarkedWords
+from txt_splitt.errors import LLMError
+from txt_splitt.keywords.types import MarkedWords
+from txt_splitt.llms.utils import looks_repetitive
 
 if TYPE_CHECKING:
-    from txt_splitt.keyword_protocols import MarkedWordsChunker
+    from txt_splitt.keywords.protocols import MarkedWordsChunker
     from txt_splitt.protocols import LLMCallable
 
 _DEFAULT_TEMPERATURE = 0.0
@@ -59,7 +62,7 @@ SECURITY:
 class KeywordExtractionLLM:
     """Query an LLM to extract keyword indices from marked text.
 
-    Supports chunking via a :class:`~txt_splitt.keyword_protocols.MarkedWordsChunker`.
+    Supports chunking via a :class:`~txt_splitt.keywords.protocols.MarkedWordsChunker`.
     For multiple chunks, all returned indices are collected and deduplicated
     (overlap regions may produce repeated indices).
     """
@@ -71,22 +74,30 @@ class KeywordExtractionLLM:
         chunker: MarkedWordsChunker | None = None,
         temperature: float = _DEFAULT_TEMPERATURE,
         max_keywords: int = _DEFAULT_MAX_KEYWORDS,
+        prompt_builder: Callable[[str, int], str] | None = None,
     ) -> None:
         self._client = client
         self._chunker = chunker
         self._temperature = temperature
         self._max_keywords = max_keywords
+        self._prompt_builder = prompt_builder
 
     def query(self, marked: MarkedWords) -> str:
         chunks = self._chunker.chunk(marked) if self._chunker is not None else [marked]
 
         all_responses: list[str] = []
         for chunk in chunks:
-            prompt = _PROMPT_TEMPLATE.format(
-                max_keywords=self._max_keywords,
-                text=chunk.tagged_text,
+            prompt = (
+                self._prompt_builder(chunk.tagged_text, self._max_keywords)
+                if self._prompt_builder is not None
+                else _PROMPT_TEMPLATE.format(
+                    max_keywords=self._max_keywords,
+                    text=chunk.tagged_text,
+                )
             )
             response = self._client.call(prompt, self._temperature)
+            if looks_repetitive(response.strip()):
+                raise LLMError("LLM response appears repetitive or stuck in a loop")
             all_responses.append(response)
 
         if len(all_responses) == 1:

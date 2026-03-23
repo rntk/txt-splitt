@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from txt_splitt.keyword_types import MarkedWords
+from txt_splitt.keywords.types import MarkedWords
 
 _MARKER_RE = re.compile(r"\{(\d+)\}")
 

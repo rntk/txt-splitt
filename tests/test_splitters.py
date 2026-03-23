@@ -2,8 +2,8 @@
 
 import pytest
 
-from txt_splitt.splitters import SparseRegexSentenceSplitter
-from txt_splitt.types import Sentence
+from txt_splitt.sentences.splitters import SparseRegexSentenceSplitter
+from txt_splitt.sentences.types import Sentence
 
 
 class TestSparseRegexSentenceSplitter:
@@ -278,7 +278,6 @@ class TestAbbreviationHandling:
         text = "The doctor arrived. She examined the patient."
         result = self._splitter().split(text)
         assert len(result) == 2
-
 
 
 class TestEmDashNotSplitting:

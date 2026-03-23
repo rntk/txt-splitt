@@ -1,18 +1,16 @@
-"""Protocol definitions for the text splitter pipeline."""
+"""Shared protocol definitions for the generic pipeline."""
 
-from typing import Protocol
+from __future__ import annotations
 
-from txt_splitt.types import (
-    MarkedText,
-    OffsetMapping,
-    Sentence,
-    SentenceGroup,
-    SplitResult,
-)
+from typing import Protocol, TypeVar
+
+from txt_splitt.types import OffsetMapping
+
+TResult = TypeVar("TResult")
 
 
 class LLMCallable(Protocol):
-    """Protocol for LLM client callables."""
+    """Protocol for sync LLM client callables."""
 
     def call(self, prompt: str, temperature: float) -> str: ...
 
@@ -23,82 +21,13 @@ class AsyncLLMCallable(Protocol):
     async def call(self, prompt: str, temperature: float) -> str: ...
 
 
-class SentenceSplitter(Protocol):
-    """Stage 1: Split raw text into sentences."""
-
-    def split(self, text: str) -> list[Sentence]: ...
-
-
-class MarkerStrategy(Protocol):
-    """Stage 2: Apply markers to sentences, producing tagged text."""
-
-    def mark(self, text: str, sentences: list[Sentence]) -> MarkedText: ...
-
-
-class LLMStrategy(Protocol):
-    """Stage 3: Query an LLM with marked text."""
-
-    def query(self, marked_text: MarkedText) -> str: ...
-
-
-class ResponseParser(Protocol):
-    """Stage 4: Parse raw LLM response into sentence groups."""
-
-    def parse(self, response: str, sentence_count: int) -> list[SentenceGroup]: ...
-
-
-class GapHandler(Protocol):
-    """Stage 5: Validate and handle gaps in sentence coverage."""
-
-    def handle(
-        self,
-        groups: list[SentenceGroup],
-        sentence_count: int,
-        sentences: list[Sentence] | None = None,
-    ) -> list[SentenceGroup]: ...
-
-
-class TopicExtractor(Protocol):
-    """Stage 3a: Extract topic labels from marked text."""
-
-    def extract(self, marked_text: MarkedText) -> list[str]: ...
-
-
-class RangeAssigner(Protocol):
-    """Stage 3b: Assign sentence ranges to given topics."""
-
-    def assign(self, marked_text: MarkedText, topics: list[str]) -> str: ...
-
-
-class MarkedTextChunker(Protocol):
-    """Optional: split MarkedText into smaller chunks for LLM querying."""
-
-    def chunk(self, marked_text: MarkedText) -> list[MarkedText]: ...
-
-
-class Enhancer(Protocol):
-    """Stage 6 (optional): Refine group boundaries for short sentences."""
-
-    def enhance(
-        self, groups: list[SentenceGroup], sentences: list[Sentence]
-    ) -> list[SentenceGroup]: ...
-
-
-class GroupJoiner(Protocol):
-    """Stage 7 (optional): Join adjacent groups that belong together."""
-
-    def join(
-        self, groups: list[SentenceGroup], sentences: list[Sentence]
-    ) -> list[SentenceGroup]: ...
-
-
 class HtmlCleaner(Protocol):
-    """Stage 0 (optional): Strip HTML tags from input text."""
+    """Strip HTML tags while returning an offset mapping."""
 
     def clean(self, text: str) -> tuple[str, OffsetMapping]: ...
 
 
-class OffsetRestorer(Protocol):
-    """Final stage (optional): Restore original-text positions in SplitResult."""
+class OffsetRestorer(Protocol[TResult]):
+    """Restore original offsets on a final result object."""
 
-    def restore(self, result: SplitResult, mapping: OffsetMapping) -> SplitResult: ...
+    def restore(self, result: TResult, mapping: OffsetMapping) -> TResult: ...

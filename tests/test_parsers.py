@@ -5,8 +5,8 @@ from typing import Literal, cast
 import pytest
 
 from txt_splitt.errors import ParseError
-from txt_splitt.parsers import TopicRangeParser
-from txt_splitt.types import SentenceRange
+from txt_splitt.sentences.parsers import TopicRangeParser
+from txt_splitt.sentences.types import SentenceRange
 
 
 class TestTopicRangeParser:

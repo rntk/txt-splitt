@@ -1,4 +1,4 @@
-"""Data types for the text splitter pipeline."""
+"""Shared data types for the package."""
 
 from __future__ import annotations
 
@@ -7,76 +7,8 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True, slots=True)
-class Sentence:
-    """A sentence extracted from source text."""
-
-    index: int  # 0-based position
-    start: int  # char offset in source text
-    end: int  # char offset (exclusive, slice convention)
-    text: str  # the actual sentence text
-
-
-@dataclass(frozen=True, slots=True)
-class MarkedText:
-    """Text with sentence markers applied."""
-
-    tagged_text: str  # formatted string with {N} markers
-    sentence_count: int
-
-
-@dataclass(frozen=True, slots=True)
-class PreparedChunk:
-    """A chunk of marked text ready to send to an LLM."""
-
-    chunk_id: int
-    tagged_text: str
-    sentence_count: int
-    marker_start: int | None
-    marker_end: int | None
-
-
-@dataclass(frozen=True, slots=True)
-class PreparedDocument:
-    """Prepared single-document state for two-stage pipeline processing."""
-
-    original_text: str
-    prepared_text: str
-    sentences: tuple[Sentence, ...]
-    marked_text: MarkedText
-    chunks: tuple[PreparedChunk, ...]
-    offset_mapping: OffsetMapping | None
-
-
-@dataclass(frozen=True, slots=True)
-class SentenceRange:
-    """A range of sentence indices (both inclusive)."""
-
-    start: int  # 0-based sentence index (inclusive)
-    end: int  # 0-based sentence index (inclusive)
-
-
-@dataclass(frozen=True, slots=True)
-class SentenceGroup:
-    """A group of sentences sharing a topic label."""
-
-    label: tuple[str, ...]  # e.g. ("Technology", "AI", "GPT-4")
-    ranges: tuple[SentenceRange, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class SplitResult:
-    """Final result of the text splitting pipeline."""
-
-    sentences: tuple[Sentence, ...]
-    groups: tuple[SentenceGroup, ...]
-
-
-@dataclass(frozen=True, slots=True)
 class OffsetSegment:
-    """A contiguous text segment preserved during HTML cleaning.
-
-    Maps a range in clean text back to the corresponding range in original text.
-    """
+    """A contiguous text segment preserved during HTML cleaning."""
 
     clean_offset: int
     original_offset: int
@@ -85,23 +17,14 @@ class OffsetSegment:
 
 @dataclass(frozen=True, slots=True)
 class OffsetMapping:
-    """Mapping between clean-text and original-HTML-text positions.
-
-    Built from a sequence of ``OffsetSegment`` instances representing the
-    non-tag portions of the original text.
-    """
+    """Mapping between clean-text and original-text positions."""
 
     segments: tuple[OffsetSegment, ...]
     original_length: int
     clean_length: int
 
     def to_original(self, clean_pos: int) -> int:
-        """Map a position in clean text to the corresponding original-text position.
-
-        For positions at segment boundaries the result points to the start of
-        the corresponding original segment, so sentence spans may include HTML
-        tags that fall within their range.
-        """
+        """Map a position in clean text back to the original text."""
         if clean_pos < 0:
             msg = f"clean_pos must be non-negative, got {clean_pos}"
             raise ValueError(msg)
@@ -114,25 +37,7 @@ class OffsetMapping:
             msg = "cannot map position: no segments in mapping"
             raise ValueError(msg)
 
-        offsets = [seg.clean_offset for seg in self.segments]
+        offsets = [segment.clean_offset for segment in self.segments]
         idx = bisect.bisect_right(offsets, clean_pos) - 1
-        seg = self.segments[idx]
-        return seg.original_offset + (clean_pos - seg.clean_offset)
-
-
-def _indices_to_ranges(indices: list[int]) -> list[SentenceRange]:
-    """Convert sorted sentence indices into minimal contiguous ranges."""
-    if not indices:
-        return []
-    ranges: list[SentenceRange] = []
-    start = indices[0]
-    end = indices[0]
-    for idx in indices[1:]:
-        if idx == end + 1:
-            end = idx
-        else:
-            ranges.append(SentenceRange(start=start, end=end))
-            start = idx
-            end = idx
-    ranges.append(SentenceRange(start=start, end=end))
-    return ranges
+        segment = self.segments[idx]
+        return segment.original_offset + (clean_pos - segment.clean_offset)

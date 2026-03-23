@@ -12,8 +12,8 @@ import html
 import re
 import unicodedata
 
-from txt_splitt.protocols import MarkerStrategy
-from txt_splitt.types import MarkedText, Sentence
+from txt_splitt.sentences.protocols import MarkerStrategy
+from txt_splitt.sentences.types import MarkedText, Sentence
 
 # ---------------------------------------------------------------------------
 # Invisible / zero-width Unicode characters to strip

@@ -9,8 +9,8 @@ from txt_splitt.errors import (
     ParseError,
     SentenceSplitError,
 )
-from txt_splitt.pipeline import Pipeline
-from txt_splitt.types import (
+from txt_splitt.sentences.builders import build_pipeline
+from txt_splitt.sentences.types import (
     MarkedText,
     OffsetMapping,
     OffsetSegment,
@@ -219,7 +219,7 @@ class TestPipeline:
         sentences = _make_sentences(3)
         groups = _make_groups()
 
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=StubSplitter(sentences),
             marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
             llm=StubLLM("Technology>AI: 0-2"),
@@ -237,7 +237,7 @@ class TestPipeline:
         sentences = _make_sentences(2)
         groups = _make_groups()
 
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=StubSplitter(sentences),
             marker=StubMarker(MarkedText(tagged_text="...", sentence_count=2)),
             llm=StubLLM("..."),
@@ -253,7 +253,7 @@ class TestPipeline:
         with pytest.raises(
             ValueError, match="Incompatible llm/parser response formats"
         ):
-            Pipeline(
+            build_pipeline(
                 splitter=StubSplitter(_make_sentences(1)),
                 marker=StubMarker(MarkedText(tagged_text="...", sentence_count=1)),
                 llm=JsonStubLLM('{"topics":[]}'),
@@ -262,7 +262,7 @@ class TestPipeline:
             )
 
     def test_constructor_accepts_json_llm_with_json_parser(self) -> None:
-        Pipeline(
+        build_pipeline(
             splitter=StubSplitter(_make_sentences(1)),
             marker=StubMarker(MarkedText(tagged_text="...", sentence_count=1)),
             llm=JsonStubLLM('{"topics":[]}'),
@@ -271,7 +271,7 @@ class TestPipeline:
         )
 
     def test_constructor_accepts_json_llm_with_auto_parser(self) -> None:
-        Pipeline(
+        build_pipeline(
             splitter=StubSplitter(_make_sentences(1)),
             marker=StubMarker(MarkedText(tagged_text="...", sentence_count=1)),
             llm=JsonStubLLM('{"topics":[]}'),
@@ -280,7 +280,7 @@ class TestPipeline:
         )
 
     def test_splitter_error_propagates(self) -> None:
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=FailingSplitter(),
             marker=StubMarker(MarkedText(tagged_text="...", sentence_count=0)),
             llm=StubLLM("response"),
@@ -293,7 +293,7 @@ class TestPipeline:
     def test_llm_error_propagates(self) -> None:
         sentences = _make_sentences(3)
 
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=StubSplitter(sentences),
             marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
             llm=FailingLLM(),
@@ -306,7 +306,7 @@ class TestPipeline:
     def test_parse_error_propagates(self) -> None:
         sentences = _make_sentences(3)
 
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=StubSplitter(sentences),
             marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
             llm=StubLLM("response"),
@@ -320,7 +320,7 @@ class TestPipeline:
         sentences = _make_sentences(3)
         groups = _make_groups()
 
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=StubSplitter(sentences),
             marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
             llm=StubLLM("response"),
@@ -332,16 +332,16 @@ class TestPipeline:
 
     def test_end_to_end_with_real_stages(self) -> None:
         """Integration test using real splitter, marker, parser, gap_handler."""
-        from txt_splitt.gap_handlers import StrictGapHandler
-        from txt_splitt.markers import BracketMarker
-        from txt_splitt.parsers import TopicRangeParser
-        from txt_splitt.splitters import SparseRegexSentenceSplitter
+        from txt_splitt.sentences.gap_handlers import StrictGapHandler
+        from txt_splitt.sentences.markers import BracketMarker
+        from txt_splitt.sentences.parsers import TopicRangeParser
+        from txt_splitt.sentences.splitters import SparseRegexSentenceSplitter
 
         text = "AI is growing fast. Climate change is real."
 
         llm_response = "Technology>AI: 0\nScience>Climate: 1"
 
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=SparseRegexSentenceSplitter(),
             marker=BracketMarker(),
             llm=StubLLM(llm_response),
@@ -363,7 +363,7 @@ class TestPipeline:
         parser = RecordingParser(groups)
         gap_handler = RecordingGapHandler(groups)
 
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=StubSplitter(sentences),
             marker=StubMarker(MarkedText(tagged_text="...", sentence_count=7)),
             llm=StubLLM("Technology>AI: 0-6"),
@@ -385,7 +385,7 @@ class TestPipeline:
         groups = _make_groups()
         marker = RecordingMarker(MarkedText(tagged_text="...", sentence_count=2))
 
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=StubSplitter(sentences),
             marker=marker,
             llm=StubLLM("Technology>AI: 0-1"),
@@ -402,7 +402,7 @@ class TestPipeline:
         sentences = _make_sentences(3)
         groups = _make_groups()
 
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=StubSplitter(sentences),
             marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
             llm=StubLLM("Technology>AI: 0-2"),
@@ -418,7 +418,7 @@ class TestPipeline:
         sentences = _make_sentences(3)
         groups = _make_groups()
 
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=StubSplitter(sentences),
             marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
             llm=StubLLM("..."),
@@ -441,7 +441,7 @@ class TestPipeline:
         ]
         enhancer = RecordingEnhancer(enhanced_groups)
 
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=StubSplitter(sentences),
             marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
             llm=StubLLM("..."),
@@ -468,7 +468,7 @@ class TestPipeline:
         first = RecordingEnhancer(first_output)
         second = RecordingEnhancer(second_output)
 
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=StubSplitter(sentences),
             marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
             llm=StubLLM("..."),
@@ -500,12 +500,15 @@ class TestPipeline:
         second = RecordingEnhancer(second_output)
 
         class AsyncStubRangeAssigner:
+            def assign(self, marked_text: MarkedText, topics: list[str]) -> str:
+                raise RuntimeError("assign() should not be used in async test")
+
             async def assign_async(
                 self, marked_text: MarkedText, topics: list[str]
             ) -> str:
                 return "..."
 
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=StubSplitter(sentences),
             marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
             topic_extractor=StubTopicExtractor(["Technology>AI"]),
@@ -524,7 +527,7 @@ class TestPipeline:
         sentences = _make_sentences(3)
         groups = _make_groups()
 
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=StubSplitter(sentences),
             marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
             llm=StubLLM("..."),
@@ -539,7 +542,7 @@ class TestPipeline:
         sentences = _make_sentences(3)
         groups = _make_groups()
 
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=StubSplitter(sentences),
             marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
             llm=StubLLM("..."),
@@ -562,7 +565,7 @@ class TestPipeline:
         ]
         joiner = RecordingJoiner(joined_groups)
 
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=StubSplitter(sentences),
             marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
             llm=StubLLM("..."),
@@ -595,7 +598,7 @@ class TestPipeline:
         ]
         joiner = RecordingJoiner(enhanced_groups)
 
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=StubSplitter(sentences),
             marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
             llm=StubLLM("..."),
@@ -612,7 +615,7 @@ class TestPipeline:
         sentences = _make_sentences(3)
         groups = _make_groups()
 
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=StubSplitter(sentences),
             marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
             llm=StubLLM("..."),
@@ -701,7 +704,7 @@ class TestTwoStagePipeline:
         sentences = _make_sentences(3)
         groups = _make_groups()
 
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=StubSplitter(sentences),
             marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
             topic_extractor=StubTopicExtractor(["Technology>AI", "Science>Climate"]),
@@ -722,7 +725,7 @@ class TestTwoStagePipeline:
         topics = ["Technology>AI>GPT-4", "Sport>Football>England"]
         assigner = RecordingRangeAssigner("Technology>AI>GPT-4: 0-2")
 
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=StubSplitter(sentences),
             marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
             topic_extractor=StubTopicExtractor(topics),
@@ -736,7 +739,7 @@ class TestTwoStagePipeline:
 
     def test_rejects_llm_with_topic_extractor(self) -> None:
         with pytest.raises(ValueError, match="Cannot provide both"):
-            Pipeline(
+            build_pipeline(
                 splitter=StubSplitter(_make_sentences(1)),
                 marker=StubMarker(MarkedText(tagged_text=".", sentence_count=1)),
                 llm=StubLLM("x"),
@@ -748,7 +751,7 @@ class TestTwoStagePipeline:
 
     def test_rejects_llm_with_range_assigner(self) -> None:
         with pytest.raises(ValueError, match="Cannot provide both"):
-            Pipeline(
+            build_pipeline(
                 splitter=StubSplitter(_make_sentences(1)),
                 marker=StubMarker(MarkedText(tagged_text=".", sentence_count=1)),
                 llm=StubLLM("x"),
@@ -759,7 +762,7 @@ class TestTwoStagePipeline:
 
     def test_rejects_no_llm_path(self) -> None:
         with pytest.raises(ValueError, match="Must provide either"):
-            Pipeline(
+            build_pipeline(
                 splitter=StubSplitter(_make_sentences(1)),
                 marker=StubMarker(MarkedText(tagged_text=".", sentence_count=1)),
                 parser=StubParser(_make_groups()),
@@ -768,7 +771,7 @@ class TestTwoStagePipeline:
 
     def test_rejects_extractor_without_assigner(self) -> None:
         with pytest.raises(ValueError, match="Both .* must be provided"):
-            Pipeline(
+            build_pipeline(
                 splitter=StubSplitter(_make_sentences(1)),
                 marker=StubMarker(MarkedText(tagged_text=".", sentence_count=1)),
                 topic_extractor=StubTopicExtractor(["Technology>AI"]),
@@ -778,7 +781,7 @@ class TestTwoStagePipeline:
 
     def test_rejects_assigner_without_extractor(self) -> None:
         with pytest.raises(ValueError, match="Both .* must be provided"):
-            Pipeline(
+            build_pipeline(
                 splitter=StubSplitter(_make_sentences(1)),
                 marker=StubMarker(MarkedText(tagged_text=".", sentence_count=1)),
                 range_assigner=StubRangeAssigner("Technology>AI: 0"),
@@ -789,7 +792,7 @@ class TestTwoStagePipeline:
     def test_extractor_error_propagates(self) -> None:
         sentences = _make_sentences(3)
 
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=StubSplitter(sentences),
             marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
             topic_extractor=FailingTopicExtractor(),
@@ -803,7 +806,7 @@ class TestTwoStagePipeline:
     def test_assigner_error_propagates(self) -> None:
         sentences = _make_sentences(3)
 
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=StubSplitter(sentences),
             marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
             topic_extractor=StubTopicExtractor(["Technology>AI"]),
@@ -815,7 +818,7 @@ class TestTwoStagePipeline:
             pipeline.run("text")
 
     def test_json_assigner_with_json_parser(self) -> None:
-        Pipeline(
+        build_pipeline(
             splitter=StubSplitter(_make_sentences(1)),
             marker=StubMarker(MarkedText(tagged_text=".", sentence_count=1)),
             topic_extractor=StubTopicExtractor(["Technology>AI"]),
@@ -828,7 +831,7 @@ class TestTwoStagePipeline:
         with pytest.raises(
             ValueError, match="Incompatible llm/parser response formats"
         ):
-            Pipeline(
+            build_pipeline(
                 splitter=StubSplitter(_make_sentences(1)),
                 marker=StubMarker(MarkedText(tagged_text=".", sentence_count=1)),
                 topic_extractor=StubTopicExtractor(["Technology>AI"]),
@@ -838,14 +841,14 @@ class TestTwoStagePipeline:
             )
 
     def test_end_to_end_with_real_stages(self) -> None:
-        from txt_splitt.gap_handlers import StrictGapHandler
-        from txt_splitt.markers import BracketMarker
-        from txt_splitt.parsers import TopicRangeParser
-        from txt_splitt.splitters import SparseRegexSentenceSplitter
+        from txt_splitt.sentences.gap_handlers import StrictGapHandler
+        from txt_splitt.sentences.markers import BracketMarker
+        from txt_splitt.sentences.parsers import TopicRangeParser
+        from txt_splitt.sentences.splitters import SparseRegexSentenceSplitter
 
         text = "AI is growing fast. Climate change is real."
 
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=SparseRegexSentenceSplitter(),
             marker=BracketMarker(),
             topic_extractor=StubTopicExtractor(["Technology>AI", "Science>Climate"]),
@@ -871,7 +874,7 @@ class TestPipelineHtmlCleaning:
 
     def test_validation_cleaner_without_restorer_raises(self) -> None:
         with pytest.raises(ValueError, match="both be provided"):
-            Pipeline(
+            build_pipeline(
                 splitter=StubSplitter(_make_sentences(1)),
                 marker=StubMarker(MarkedText(tagged_text=".", sentence_count=1)),
                 llm=StubLLM("x"),
@@ -882,7 +885,7 @@ class TestPipelineHtmlCleaning:
 
     def test_validation_restorer_without_cleaner_raises(self) -> None:
         with pytest.raises(ValueError, match="both be provided"):
-            Pipeline(
+            build_pipeline(
                 splitter=StubSplitter(_make_sentences(1)),
                 marker=StubMarker(MarkedText(tagged_text=".", sentence_count=1)),
                 llm=StubLLM("x"),
@@ -892,7 +895,7 @@ class TestPipelineHtmlCleaning:
             )
 
     def test_validation_both_provided_ok(self) -> None:
-        Pipeline(
+        build_pipeline(
             splitter=StubSplitter(_make_sentences(1)),
             marker=StubMarker(MarkedText(tagged_text=".", sentence_count=1)),
             llm=StubLLM("x"),
@@ -913,7 +916,7 @@ class TestPipelineHtmlCleaning:
         groups = _make_groups()
         splitter = RecordingSplitter(sentences)
 
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=splitter,
             marker=StubMarker(MarkedText(tagged_text=".", sentence_count=1)),
             llm=StubLLM("Technology>AI: 0"),
@@ -937,7 +940,7 @@ class TestPipelineHtmlCleaning:
         groups = _make_groups()
         marker = RecordingMarker(MarkedText(tagged_text=".", sentence_count=1))
 
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=StubSplitter(sentences),
             marker=marker,
             llm=StubLLM("Technology>AI: 0"),
@@ -956,7 +959,7 @@ class TestPipelineHtmlCleaning:
         groups = _make_groups()
         restorer = StubOffsetRestorer()
 
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=StubSplitter(sentences),
             marker=StubMarker(MarkedText(tagged_text=".", sentence_count=1)),
             llm=StubLLM("Technology>AI: 0"),
@@ -971,18 +974,18 @@ class TestPipelineHtmlCleaning:
         assert restorer.seen_mapping is mapping
 
     def test_end_to_end_with_real_cleaner_and_restorer(self) -> None:
-        from txt_splitt.gap_handlers import StrictGapHandler
         from txt_splitt.html_cleaners import TagStripCleaner
-        from txt_splitt.markers import BracketMarker
-        from txt_splitt.offset_restorers import MappingOffsetRestorer
-        from txt_splitt.parsers import TopicRangeParser
-        from txt_splitt.splitters import SparseRegexSentenceSplitter
+        from txt_splitt.sentences.gap_handlers import StrictGapHandler
+        from txt_splitt.sentences.markers import BracketMarker
+        from txt_splitt.sentences.offset_restorers import MappingOffsetRestorer
+        from txt_splitt.sentences.parsers import TopicRangeParser
+        from txt_splitt.sentences.splitters import SparseRegexSentenceSplitter
 
         original = "<p>AI is growing fast.</p> <p>Climate change is real.</p>"
 
         llm_response = "Technology>AI: 0\nScience>Climate: 1"
 
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=SparseRegexSentenceSplitter(),
             marker=BracketMarker(),
             llm=StubLLM(llm_response),
@@ -1008,7 +1011,7 @@ class TestPipelineHtmlCleaning:
         sentences = _make_sentences(3)
         groups = _make_groups()
 
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=StubSplitter(sentences),
             marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
             llm=StubLLM("Technology>AI: 0-2"),

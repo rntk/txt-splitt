@@ -4,14 +4,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from txt_splitt.boundary_evaluator import (
+from txt_splitt.errors import EnhancerError
+from txt_splitt.sentences.boundary_evaluator import (
     BoundaryEvaluator,
     _build_boundary_prompt,
     _gather_boundary_context,
     _parse_boundary_response,
 )
-from txt_splitt.errors import EnhancerError
-from txt_splitt.types import Sentence, SentenceGroup, SentenceRange
+from txt_splitt.sentences.types import Sentence, SentenceGroup, SentenceRange
 
 
 def _make_sentence(index: int, text: str) -> Sentence:

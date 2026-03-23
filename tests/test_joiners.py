@@ -2,8 +2,11 @@
 
 import pytest
 
-from txt_splitt.joiners import AdjacentSameTopicJoiner, join_sentences_by_groups
-from txt_splitt.types import Sentence, SentenceGroup, SentenceRange
+from txt_splitt.sentences.joiners import (
+    AdjacentSameTopicJoiner,
+    join_sentences_by_groups,
+)
+from txt_splitt.sentences.types import Sentence, SentenceGroup, SentenceRange
 
 
 def _sentences(n: int) -> list[Sentence]:

@@ -1,8 +1,13 @@
 """Shared fixtures for text splitter tests."""
 
+import sys
+from pathlib import Path
+
 import pytest
 
-from txt_splitt.types import Sentence, SentenceGroup, SentenceRange
+from txt_splitt.sentences.types import Sentence, SentenceGroup, SentenceRange
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 @pytest.fixture

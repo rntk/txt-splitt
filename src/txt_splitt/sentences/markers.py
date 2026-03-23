@@ -1,6 +1,6 @@
 """Marker strategy implementations."""
 
-from txt_splitt.types import MarkedText, Sentence
+from txt_splitt.sentences.types import MarkedText, Sentence
 
 
 class BracketMarker:

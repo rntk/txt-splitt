@@ -2,7 +2,7 @@
 
 from txt_splitt.errors import EnhancerError
 from txt_splitt.protocols import LLMCallable
-from txt_splitt.types import Sentence, SentenceGroup, _indices_to_ranges
+from txt_splitt.sentences.types import Sentence, SentenceGroup, _indices_to_ranges
 
 _CONTEXT_SIZE = 3
 
@@ -175,5 +175,3 @@ def _parse_reassignment_response(response: str) -> str | None:
     if has_next and not has_previous:
         return "next"
     return None
-
-

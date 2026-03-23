@@ -2,14 +2,14 @@
 
 import pytest
 
-from txt_splitt.pipeline import Pipeline
-from txt_splitt.tracer import Span, Tracer, TracingLLMCallable
-from txt_splitt.types import (
+from txt_splitt.sentences.builders import build_pipeline
+from txt_splitt.sentences.types import (
     MarkedText,
     Sentence,
     SentenceGroup,
     SentenceRange,
 )
+from txt_splitt.tracer import Span, Tracer, TracingLLMCallable
 
 
 class TestSpan:
@@ -241,7 +241,7 @@ class TestPipelineTracing:
     def test_pipeline_without_tracer(self) -> None:
         sentences = self._make_sentences(3)
         groups = self._make_groups()
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=StubSplitter(sentences),
             marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
             llm=StubLLMStrategy("Tech: 0-2"),
@@ -256,7 +256,7 @@ class TestPipelineTracing:
 
         sentences = self._make_sentences(3)
         groups = self._make_groups()
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=StubSplitter(sentences),
             marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
             llm=StubLLMStrategy("Tech: 0-2"),
@@ -274,7 +274,7 @@ class TestPipelineTracing:
         tracer = Tracer()
         sentences = self._make_sentences(3)
         groups = self._make_groups()
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=StubSplitter(sentences),
             marker=StubMarker(MarkedText(tagged_text="tagged", sentence_count=3)),
             llm=StubLLMStrategy("Tech: 0-2"),
@@ -315,7 +315,7 @@ class TestPipelineTracing:
             ) -> list[SentenceGroup]:
                 return groups
 
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=StubSplitter(sentences),
             marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
             llm=StubLLMStrategy("..."),
@@ -334,7 +334,7 @@ class TestPipelineTracing:
         tracer = Tracer()
         sentences = self._make_sentences(3)
         groups = self._make_groups()
-        pipeline = Pipeline(
+        pipeline = build_pipeline(
             splitter=StubSplitter(sentences),
             marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
             llm=StubLLMStrategy("Tech: 0-2"),

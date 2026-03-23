@@ -1,8 +1,8 @@
-"""Protocol definitions for the keyword extraction pipeline."""
+"""Keyword-oriented protocol definitions."""
 
 from typing import Protocol
 
-from txt_splitt.keyword_types import Keyword, MarkedWords, Word
+from txt_splitt.keywords.types import Keyword, MarkedWords, Word
 
 
 class WordSplitter(Protocol):
@@ -35,10 +35,10 @@ class MarkedWordsChunker(Protocol):
     def chunk(self, marked: MarkedWords) -> list[MarkedWords]: ...
 
 
-class KeywordGapValidatorStrategy(Protocol):
-    """Optional Stage 5.5: detect and heal large uncovered gaps."""
+class GapHandler(Protocol):
+    """Repair large uncovered gaps in keyword coverage."""
 
-    def validate(
+    def handle(
         self,
         keywords: list[Keyword],
         words: list[Word],

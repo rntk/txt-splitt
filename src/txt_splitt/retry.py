@@ -115,7 +115,6 @@ def execute_with_retry(
             attempt += 1
 
 
-
 class RetryingLLMCallable:
     """Wraps an LLM client with retry logic and exponential backoff."""
 

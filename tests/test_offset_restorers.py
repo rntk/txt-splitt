@@ -1,7 +1,7 @@
 """Tests for offset restoration."""
 
-from txt_splitt.offset_restorers import MappingOffsetRestorer
-from txt_splitt.types import (
+from txt_splitt.sentences.offset_restorers import MappingOffsetRestorer
+from txt_splitt.sentences.types import (
     OffsetMapping,
     OffsetSegment,
     Sentence,

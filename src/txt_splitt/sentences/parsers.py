@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from typing import Literal
 
 from txt_splitt.errors import ParseError
-from txt_splitt.types import SentenceGroup, SentenceRange
+from txt_splitt.sentences.types import SentenceGroup, SentenceRange
 
 # Compiled regex for parsing range strings like "0-5" or "10"
 _RANGE_PATTERN = re.compile(r"(\d+)\s*-\s*(\d+)")

@@ -1,7 +1,7 @@
 """Tests for text normalization and OptimizingMarker."""
 
-from txt_splitt.markers import BracketMarker
-from txt_splitt.text_optimizers import (
+from txt_splitt.sentences.markers import BracketMarker
+from txt_splitt.sentences.text_optimizers import (
     OptimizingMarker,
     collapse_whitespace,
     decode_html_entities,
@@ -9,7 +9,7 @@ from txt_splitt.text_optimizers import (
     normalize_for_llm,
     strip_zero_width_chars,
 )
-from txt_splitt.types import MarkedText, Sentence
+from txt_splitt.sentences.types import MarkedText, Sentence
 
 
 class TestDecodeHtmlEntities:

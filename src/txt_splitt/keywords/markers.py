@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from txt_splitt.keyword_types import MarkedWords, Word
+from txt_splitt.keywords.types import MarkedWords, Word
 
 
 class WordBracketMarker:

@@ -2,7 +2,7 @@
 
 import re
 
-from txt_splitt.types import MarkedText
+from txt_splitt.sentences.types import MarkedText
 
 _DEFAULT_MAX_CHARS = 12_000
 _DEFAULT_OVERLAP_CHARS = 500

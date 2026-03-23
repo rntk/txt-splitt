@@ -8,8 +8,8 @@ from typing import TypeAlias
 
 from txt_splitt.errors import GapError
 from txt_splitt.protocols import LLMCallable
+from txt_splitt.sentences.types import Sentence, SentenceGroup, SentenceRange
 from txt_splitt.tracer import NoOpSpan, NoOpTracer, Span, Tracer
-from txt_splitt.types import Sentence, SentenceGroup, SentenceRange
 
 _CONTEXT_SIZE = 3
 _DEFAULT_NEW_TOPIC = ("Uncategorized",)

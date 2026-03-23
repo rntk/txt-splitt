@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from txt_splitt.types import OffsetMapping, Sentence, SplitResult
+from txt_splitt.sentences.types import Sentence, SplitResult
+from txt_splitt.types import OffsetMapping
 
 
 class MappingOffsetRestorer:

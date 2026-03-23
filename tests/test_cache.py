@@ -16,10 +16,15 @@ from txt_splitt.cache import (
     MemoryLLMCacheStore,
     SQLiteLLMCacheStore,
 )
-from txt_splitt.gap_handlers import LLMRepairingGapHandler
-from txt_splitt.llm import TopicRangeAssignmentLLM, TopicRangeLLM
+from txt_splitt.sentences.gap_handlers import LLMRepairingGapHandler
+from txt_splitt.sentences.llm import TopicRangeAssignmentLLM, TopicRangeLLM
+from txt_splitt.sentences.types import (
+    MarkedText,
+    Sentence,
+    SentenceGroup,
+    SentenceRange,
+)
 from txt_splitt.tracer import Tracer, TracingLLMCallable
-from txt_splitt.types import MarkedText, Sentence, SentenceGroup, SentenceRange
 
 
 class AsyncMemoryStore(AsyncLLMCacheStore):

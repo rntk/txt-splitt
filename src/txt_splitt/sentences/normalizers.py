@@ -2,8 +2,8 @@
 
 import re
 
-from txt_splitt.protocols import SentenceSplitter
-from txt_splitt.types import Sentence
+from txt_splitt.sentences.protocols import SentenceSplitter
+from txt_splitt.sentences.types import Sentence
 
 _DEFAULT_MIN_LENGTH = 40
 _DEFAULT_MAX_LENGTH = 300

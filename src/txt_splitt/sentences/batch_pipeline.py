@@ -5,25 +5,24 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, Sequence, final
 
-from txt_splitt.joiners import join_sentences_by_groups
-from txt_splitt.protocols import (
+from txt_splitt.protocols import HtmlCleaner, OffsetRestorer
+from txt_splitt.sentences.joiners import join_sentences_by_groups
+from txt_splitt.sentences.protocols import (
     Enhancer,
     GapHandler,
     GroupJoiner,
-    HtmlCleaner,
     MarkedTextChunker,
     MarkerStrategy,
-    OffsetRestorer,
     ResponseParser,
     SentenceSplitter,
 )
-from txt_splitt.tracer import NoOpTracer
-from txt_splitt.types import (
+from txt_splitt.sentences.types import (
     MarkedText,
     PreparedChunk,
     PreparedDocument,
     SplitResult,
 )
+from txt_splitt.tracer import NoOpTracer
 
 if TYPE_CHECKING:
     from txt_splitt.tracer import Tracer
@@ -51,7 +50,7 @@ class BatchPipeline:
         enhancers: Sequence[Enhancer] | None = None,
         joiner: GroupJoiner | None = None,
         html_cleaner: HtmlCleaner | None = None,
-        offset_restorer: OffsetRestorer | None = None,
+        offset_restorer: OffsetRestorer[SplitResult] | None = None,
         tracer: Tracer | None = None,
     ) -> None:
         if (html_cleaner is None) != (offset_restorer is None):

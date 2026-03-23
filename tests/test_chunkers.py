@@ -4,8 +4,8 @@ import re
 
 import pytest
 
-from txt_splitt.chunkers import OverlapChunker, SizeBasedChunker
-from txt_splitt.types import MarkedText
+from txt_splitt.sentences.chunkers import OverlapChunker, SizeBasedChunker
+from txt_splitt.sentences.types import MarkedText
 
 
 class TestSizeBasedChunker:

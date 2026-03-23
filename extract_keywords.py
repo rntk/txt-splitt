@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Script to extract keywords from text using LLamaCPP client and KeywordPipeline."""
+"""Script to extract keywords from text using LLamaCPP client."""
 
 import argparse
 import json
@@ -12,18 +12,16 @@ from typing import Any
 # Add src to path so we can import txt_splitt when running from root
 sys.path.append(str(Path(__file__).parent / "src"))
 
-from txt_splitt import (
-    HTMLParserTagStripCleaner,
+from txt_splitt import LLMCallable, RetryingLLMCallable, TracingLLMCallable
+from txt_splitt.html_cleaners import HTMLParserTagStripCleaner
+from txt_splitt.keywords import (
     KeywordExtractionLLM,
-    KeywordGapValidator,
     KeywordIndexParser,
-    KeywordPipeline,
-    LLMCallable,
     RegexWordSplitter,
-    RetryingLLMCallable,
-    TracingLLMCallable,
+    RepairingGapHandler,
     WordBracketMarker,
     WordOverlapChunker,
+    build_pipeline,
 )
 from txt_splitt.llms.llamacpp import LLamaCPP
 from txt_splitt.tracer import Tracer
@@ -37,7 +35,7 @@ class LLamaCPPAdapter:
 
     def call(self, prompt: str, temperature: float) -> str:
         """Call the LLM with a prompt and temperature."""
-        return self._client.call([prompt], temperature=temperature)  # type: ignore[no-any-return]
+        return self._client.call([prompt], temperature=temperature)
 
 
 def result_to_dict(result: Any) -> dict[str, Any]:
@@ -353,10 +351,10 @@ def main() -> None:
     if input_path.suffix.lower() in {".html", ".htm"}:
         html_cleaner = HTMLParserTagStripCleaner(strip_tags={"style", "script"})
 
-    gap_validator = None
+    gap_handler = None
     if args.min_gap_words > 0:
-        gap_validator = KeywordGapValidator(
-            word_splitter=RegexWordSplitter(),
+        gap_handler = RepairingGapHandler(
+            splitter=RegexWordSplitter(),
             marker=WordBracketMarker(),
             llm=KeywordExtractionLLM(
                 llm_callable,
@@ -372,8 +370,8 @@ def main() -> None:
             tracer=tracer,
         )
 
-    pipeline = KeywordPipeline(
-        word_splitter=RegexWordSplitter(),
+    pipeline = build_pipeline(
+        splitter=RegexWordSplitter(),
         marker=WordBracketMarker(),
         llm=KeywordExtractionLLM(
             llm_callable,
@@ -386,7 +384,7 @@ def main() -> None:
         ),
         parser=KeywordIndexParser(),
         html_cleaner=html_cleaner,
-        gap_validator=gap_validator,
+        gap_handler=gap_handler,
         tracer=tracer,
     )
 

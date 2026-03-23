@@ -47,7 +47,8 @@ the wrapper. The wrapper owns key generation; your store only needs `get()` and
 `set()` operations for `CacheEntry` records.
 
 ```python
-from txt_splitt import CachingLLMCallable, TopicRangeLLM
+from txt_splitt import CachingLLMCallable
+from txt_splitt.sentences import TopicRangeLLM
 
 cached_client = CachingLLMCallable(
     inner=my_llm_client,

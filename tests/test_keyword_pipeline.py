@@ -8,18 +8,18 @@ import pytest
 
 from txt_splitt.errors import ParseError
 from txt_splitt.html_cleaners import TagStripCleaner
-from txt_splitt.keyword_chunkers import WordOverlapChunker, _split_tokens
-from txt_splitt.keyword_gap_validator import (
-    KeywordGapValidator,
+from txt_splitt.keywords.builders import build_pipeline
+from txt_splitt.keywords.chunkers import WordOverlapChunker, _split_tokens
+from txt_splitt.keywords.gap_handlers import (
+    RepairingGapHandler,
     _find_gap_word_ranges,
     _merge_keywords,
 )
-from txt_splitt.keyword_llm import _merge_responses
-from txt_splitt.keyword_markers import WordBracketMarker
-from txt_splitt.keyword_parsers import KeywordIndexParser
-from txt_splitt.keyword_pipeline import KeywordPipeline
-from txt_splitt.keyword_splitters import RegexWordSplitter
-from txt_splitt.keyword_types import Keyword, MarkedWords, Word
+from txt_splitt.keywords.llm import _merge_responses
+from txt_splitt.keywords.markers import WordBracketMarker
+from txt_splitt.keywords.parsers import KeywordIndexParser
+from txt_splitt.keywords.splitters import RegexWordSplitter
+from txt_splitt.keywords.types import Keyword, MarkedWords, Word
 
 # ---------------------------------------------------------------------------
 # Word splitting
@@ -200,8 +200,8 @@ class MockKeywordLLM:
 
 class TestKeywordPipeline:
     def test_basic_pipeline(self) -> None:
-        pipeline = KeywordPipeline(
-            word_splitter=RegexWordSplitter(),
+        pipeline = build_pipeline(
+            splitter=RegexWordSplitter(),
             marker=WordBracketMarker(),
             llm=MockKeywordLLM("0, 2"),
             parser=KeywordIndexParser(),
@@ -214,8 +214,8 @@ class TestKeywordPipeline:
         assert "foo" in kw_texts
 
     def test_pipeline_with_phrase(self) -> None:
-        pipeline = KeywordPipeline(
-            word_splitter=RegexWordSplitter(),
+        pipeline = build_pipeline(
+            splitter=RegexWordSplitter(),
             marker=WordBracketMarker(),
             llm=MockKeywordLLM("0-1"),
             parser=KeywordIndexParser(),
@@ -225,8 +225,8 @@ class TestKeywordPipeline:
         assert result.keywords[0].text == "machine learning"
 
     def test_pipeline_empty_response(self) -> None:
-        pipeline = KeywordPipeline(
-            word_splitter=RegexWordSplitter(),
+        pipeline = build_pipeline(
+            splitter=RegexWordSplitter(),
             marker=WordBracketMarker(),
             llm=MockKeywordLLM(""),
             parser=KeywordIndexParser(),
@@ -237,8 +237,8 @@ class TestKeywordPipeline:
 
     def test_pipeline_keyword_offsets(self) -> None:
         text = "hello world"
-        pipeline = KeywordPipeline(
-            word_splitter=RegexWordSplitter(),
+        pipeline = build_pipeline(
+            splitter=RegexWordSplitter(),
             marker=WordBracketMarker(),
             llm=MockKeywordLLM("1"),
             parser=KeywordIndexParser(),
@@ -251,8 +251,8 @@ class TestKeywordPipeline:
 
     def test_pipeline_preserves_words(self) -> None:
         text = "the quick brown fox"
-        pipeline = KeywordPipeline(
-            word_splitter=RegexWordSplitter(),
+        pipeline = build_pipeline(
+            splitter=RegexWordSplitter(),
             marker=WordBracketMarker(),
             llm=MockKeywordLLM("1, 3"),
             parser=KeywordIndexParser(),
@@ -271,8 +271,8 @@ class TestKeywordPipeline:
 class TestKeywordPipelineHtml:
     def test_html_offset_backmap(self) -> None:
         html = "<b>hello</b> world"
-        pipeline = KeywordPipeline(
-            word_splitter=RegexWordSplitter(),
+        pipeline = build_pipeline(
+            splitter=RegexWordSplitter(),
             marker=WordBracketMarker(),
             llm=MockKeywordLLM("0"),
             parser=KeywordIndexParser(),
@@ -289,8 +289,8 @@ class TestKeywordPipelineHtml:
 
     def test_html_multi_keyword(self) -> None:
         html = "<p>machine learning</p>"
-        pipeline = KeywordPipeline(
-            word_splitter=RegexWordSplitter(),
+        pipeline = build_pipeline(
+            splitter=RegexWordSplitter(),
             marker=WordBracketMarker(),
             llm=MockKeywordLLM("0-1"),
             parser=KeywordIndexParser(),
@@ -420,7 +420,7 @@ class TestMergeKeywords:
 
 
 # ---------------------------------------------------------------------------
-# KeywordGapValidator end-to-end
+# RepairingGapHandler end-to-end
 # ---------------------------------------------------------------------------
 
 
@@ -428,7 +428,7 @@ def _make_gap_llm(response: str) -> MockKeywordLLM:
     return MockKeywordLLM(response)
 
 
-class TestKeywordGapValidator:
+class TestRepairingGapHandler:
     def _build_text_and_words(self, n: int) -> tuple[str, list[Word]]:
         """Build a text of n single-char words: 'w0 w1 w2 ...'"""
         labels = [f"w{i}" for i in range(n)]
@@ -441,8 +441,8 @@ class TestKeywordGapValidator:
             Keyword(text=words[0].text, start=words[0].start, end=words[0].end),
             Keyword(text=words[9].text, start=words[9].start, end=words[9].end),
         ]
-        validator = KeywordGapValidator(
-            word_splitter=RegexWordSplitter(),
+        validator = RepairingGapHandler(
+            splitter=RegexWordSplitter(),
             marker=WordBracketMarker(),
             llm=_make_gap_llm("0"),  # would add one keyword if called
             parser=KeywordIndexParser(),
@@ -457,8 +457,8 @@ class TestKeywordGapValidator:
         # cover only word 0; words 1-29 form a gap of 29 words
         kws = [Keyword(text=words[0].text, start=words[0].start, end=words[0].end)]
         # The re-query LLM will say "0" (first word of the gap sub-text = words[1])
-        validator = KeywordGapValidator(
-            word_splitter=RegexWordSplitter(),
+        validator = RepairingGapHandler(
+            splitter=RegexWordSplitter(),
             marker=WordBracketMarker(),
             llm=_make_gap_llm("0"),
             parser=KeywordIndexParser(),
@@ -476,27 +476,27 @@ class TestKeywordGapValidator:
         main_llm = MockKeywordLLM("0")  # covers only w0
         heal_llm = MockKeywordLLM("0")  # covers first word of each gap slice
 
-        validator = KeywordGapValidator(
-            word_splitter=RegexWordSplitter(),
+        validator = RepairingGapHandler(
+            splitter=RegexWordSplitter(),
             marker=WordBracketMarker(),
             llm=heal_llm,
             parser=KeywordIndexParser(),
             min_gap_words=20,
         )
-        pipeline = KeywordPipeline(
-            word_splitter=RegexWordSplitter(),
+        pipeline = build_pipeline(
+            splitter=RegexWordSplitter(),
             marker=WordBracketMarker(),
             llm=main_llm,
             parser=KeywordIndexParser(),
-            gap_validator=validator,
+            gap_handler=validator,
         )
         result = pipeline.run(text)
         assert len(result.keywords) > 1
 
     def test_invalid_min_gap_words_raises(self) -> None:
         with pytest.raises(ValueError):
-            KeywordGapValidator(
-                word_splitter=RegexWordSplitter(),
+            RepairingGapHandler(
+                splitter=RegexWordSplitter(),
                 marker=WordBracketMarker(),
                 llm=MockKeywordLLM(""),
                 parser=KeywordIndexParser(),

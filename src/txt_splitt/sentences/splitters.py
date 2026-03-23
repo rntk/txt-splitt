@@ -8,7 +8,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
-from txt_splitt.types import Sentence
+from txt_splitt.sentences.types import Sentence
 
 # Closing characters that may follow sentence-ending punctuation before whitespace:
 # straight/curly quotes, closing parens/brackets, guillemet

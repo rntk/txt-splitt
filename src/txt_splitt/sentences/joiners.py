@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from txt_splitt.types import Sentence, SentenceGroup, SentenceRange
+from txt_splitt.sentences.types import Sentence, SentenceGroup, SentenceRange
 
 
 class AdjacentSameTopicJoiner:
