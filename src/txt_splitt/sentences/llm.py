@@ -606,12 +606,6 @@ SENTENCE RULES:
 - Be granular: separate distinct stories/topics into their own keyword groups
 - Consecutive markers that continue one idea should stay in the same group even
   if split by newline formatting
-- Prefer fewer, broader topic groups over many narrow ones. A topic group
-  should typically span at least 3-5 consecutive sentences.
-- Do NOT create separate topics for: image captions, figure references,
-  transitional phrases (e.g., "Feel free to skip it", "Let's move on"),
-  meta-commentary about the text structure, or single standalone sentences.
-  Merge these into the surrounding topic instead.
 
 <content>
 {tagged_text}
@@ -773,10 +767,6 @@ SPECIFICITY BALANCE:
 - Specific aspect → add another ">" level: "PostgreSQL>Indexing", "Python>Asyncio"
 - Don't over-specify: "React>Hooks" not "React hooks useState optimization patterns"
 - Do NOT use ":" inside topic path segments.
-- Prefer fewer, broader topics. Each topic should cover a meaningful section
-  of the text (typically 3-5+ sentences). Do NOT create topics for image
-  captions, figure references, transitional phrases, or meta-commentary —
-  these will be merged into adjacent topics automatically.
 
 OUTPUT FORMAT (exactly one topic per line, NO sentence ranges):
 CategoryLevel1>CategoryLevel2>...>SpecificTopic
@@ -836,9 +826,6 @@ SENTENCE RULES:
 - Be granular: only include sentences that genuinely belong to this topic
 - Consecutive markers that continue one idea should stay together even
   if split by newline formatting
-- Include transitional, connective, or short generic sentences that appear
-  within or immediately adjacent to this topic's content (e.g., "Feel free
-  to skip it", figure captions, meta-commentary). Do not leave them unassigned.
 
 <content>
 {tagged_text}
