@@ -360,3 +360,98 @@ class TestEmojiAndUnicodeSentenceStart:
         result = splitter.split(text)
         assert len(result) == 2
         assert result[1].text.startswith("\u0645")
+
+
+class TestQuoteAwareSplitting:
+    def test_does_not_split_inside_double_quotes(self) -> None:
+        splitter = SparseRegexSentenceSplitter(anchor_every_words=24, quote_aware=True)
+        text = 'He said "Hello world. Then goodbye." And left.'
+        result = splitter.split(text)
+        assert len(result) == 2
+        assert result[0].text == 'He said "Hello world. Then goodbye."'
+        assert result[1].text == "And left."
+
+    def test_does_not_split_inside_parentheses(self) -> None:
+        splitter = SparseRegexSentenceSplitter(anchor_every_words=24, quote_aware=True)
+        text = "The result (see Fig. 1. The data shows improvement.) was significant."
+        result = splitter.split(text)
+        assert len(result) == 1
+        assert result[0].text == text
+
+    def test_does_not_split_inside_curly_double_quotes(self) -> None:
+        splitter = SparseRegexSentenceSplitter(anchor_every_words=24, quote_aware=True)
+        text = "She wrote \u201cHello world. Then goodbye.\u201d Then she left."
+        result = splitter.split(text)
+        assert len(result) == 2
+        assert result[0].text == "She wrote \u201cHello world. Then goodbye.\u201d"
+        assert result[1].text == "Then she left."
+
+    def test_does_not_split_inside_square_brackets(self) -> None:
+        splitter = SparseRegexSentenceSplitter(anchor_every_words=24, quote_aware=True)
+        text = "See note [This covers two points. Both are valid.] for details."
+        result = splitter.split(text)
+        assert len(result) == 1
+        assert result[0].text == text
+
+    def test_does_not_split_inside_guillemets(self) -> None:
+        splitter = SparseRegexSentenceSplitter(anchor_every_words=24, quote_aware=True)
+        text = "Il dit \u00abBonjour. Au revoir.\u00bb Puis il parti."
+        result = splitter.split(text)
+        assert len(result) == 2
+        assert result[0].text == "Il dit \u00abBonjour. Au revoir.\u00bb"
+        assert result[1].text == "Puis il parti."
+
+    def test_nested_quotes_in_parens(self) -> None:
+        splitter = SparseRegexSentenceSplitter(anchor_every_words=24, quote_aware=True)
+        text = '(He said "wow. Great." Really.) Next sentence follows here.'
+        result = splitter.split(text)
+        assert len(result) == 2
+        assert result[0].text == '(He said "wow. Great." Really.)'
+        assert result[1].text == "Next sentence follows here."
+
+    def test_unmatched_quote_falls_back_to_normal_splitting(self) -> None:
+        splitter = SparseRegexSentenceSplitter(anchor_every_words=24, quote_aware=True)
+        # No closing quote — boundaries inside should not be suppressed.
+        text = 'He said "Hello world. Then goodbye. And left.'
+        result = splitter.split(text)
+        # Without a matching close quote, the splitter should produce >1 sentence.
+        assert len(result) > 1
+
+    def test_default_off_still_splits_inside_quotes(self) -> None:
+        splitter = SparseRegexSentenceSplitter(anchor_every_words=24)
+        text = 'He said "Hello world. Then goodbye." And left.'
+        result = splitter.split(text)
+        # Without quote_aware, splits inside the quoted span.
+        assert len(result) == 3
+
+    def test_curly_single_quotes(self) -> None:
+        splitter = SparseRegexSentenceSplitter(anchor_every_words=24, quote_aware=True)
+        text = "She thought \u2018What now. What next.\u2019 And moved on."
+        result = splitter.split(text)
+        assert len(result) == 2
+        assert result[0].text == "She thought \u2018What now. What next.\u2019"
+        assert result[1].text == "And moved on."
+
+    def test_long_quoted_region_still_splits(self) -> None:
+        # A quoted region exceeding long_sentence_word_threshold should be re-split.
+        splitter = SparseRegexSentenceSplitter(
+            anchor_every_words=5,
+            long_sentence_word_threshold=10,
+            quote_aware=True,
+        )
+        # 20+ words inside quotes — too long, so anchor fallback kicks in.
+        text = (
+            '"One two three four five. Six seven eight nine ten. '
+            "Eleven twelve thirteen fourteen fifteen. Sixteen seventeen eighteen."
+            '" After quote.'
+        )
+        result = splitter.split(text)
+        assert len(result) > 1
+
+    def test_apostrophe_not_treated_as_quote(self) -> None:
+        splitter = SparseRegexSentenceSplitter(anchor_every_words=24, quote_aware=True)
+        # Single straight quotes (apostrophes) must not confuse paired detection.
+        text = "Don't stop. It's not done. We can't quit now. Let's go home."
+        result = splitter.split(text)
+        # Should still split normally at terminal punctuation.
+        assert len(result) >= 2

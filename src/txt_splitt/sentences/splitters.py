@@ -64,6 +64,72 @@ _PRIORITY_TERMINAL = 0
 _PRIORITY_SEPARATOR = 1
 _PRIORITY_BLANK_LINE = 2
 
+# Paired delimiter maps for quote/bracket-aware mode.
+# Maps each opening character to its matching closing character.
+# Straight double quote uses a toggle heuristic (it is both open and close).
+# Single straight quotes are excluded due to apostrophe ambiguity.
+_PAIRED_DELIMITERS: dict[str, str] = {
+    '"': '"',
+    "\u201c": "\u201d",  # curly double quotes
+    "\u2018": "\u2019",  # curly single quotes
+    "(": ")",
+    "[": "]",
+    "{": "}",
+    "\u00ab": "\u00bb",  # guillemets
+}
+
+
+def _scan_paired_regions(
+    text: str,
+    delimiters: dict[str, str],
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """Scan text for matched paired delimiter regions.
+
+    Returns sorted (starts, ends) tuples of paired regions [open_pos, close_pos+1).
+    Unmatched delimiters are silently ignored (no region recorded).
+    Straight double quote uses a toggle heuristic: if the top of the stack is already
+    a ``"`` it is treated as a closing quote, otherwise as an opening quote.
+    """
+    close_to_open = {v: k for k, v in delimiters.items() if k != v}
+    # Straight double quote is its own open AND close — handled specially.
+    symmetric = {k for k, v in delimiters.items() if k == v}
+
+    stack: list[tuple[str, int]] = []  # (open_char, position)
+    regions: list[tuple[int, int]] = []
+
+    for i, ch in enumerate(text):
+        if ch in symmetric:
+            # Toggle: if stack top is the same char, close it; otherwise open.
+            if stack and stack[-1][0] == ch:
+                open_char, open_pos = stack.pop()
+                regions.append((open_pos, i + 1))
+            else:
+                stack.append((ch, i))
+        elif ch in delimiters:
+            stack.append((ch, i))
+        elif ch in close_to_open:
+            open_char = close_to_open[ch]
+            # Find the most recent matching open on the stack.
+            for j in range(len(stack) - 1, -1, -1):
+                if stack[j][0] == open_char:
+                    _, open_pos = stack[j]
+                    del stack[j]
+                    regions.append((open_pos, i + 1))
+                    break
+
+    regions.sort()
+    # Merge overlapping/nested regions so the result is non-overlapping and sorted.
+    # This is required for the bisect-based lookup in _SplitContext to work correctly.
+    merged: list[tuple[int, int]] = []
+    for region_start, region_end in regions:
+        if merged and region_start < merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], region_end))
+        else:
+            merged.append((region_start, region_end))
+    starts = tuple(s for s, _ in merged)
+    ends = tuple(e for _, e in merged)
+    return starts, ends
+
 
 @dataclass(frozen=True, slots=True)
 class _BoundaryCandidate:
@@ -83,18 +149,39 @@ class _SignalSpan:
 class _SplitContext:
     tag_starts: tuple[int, ...]
     tag_ends: tuple[int, ...]
+    paired_starts: tuple[int, ...]
+    paired_ends: tuple[int, ...]
 
     @classmethod
-    def from_text(cls, text: str, *, html_aware: bool) -> _SplitContext:
-        if not html_aware:
-            return cls(tag_starts=(), tag_ends=())
+    def from_text(
+        cls,
+        text: str,
+        *,
+        html_aware: bool,
+        quote_aware: bool,
+    ) -> _SplitContext:
+        tag_starts: tuple[int, ...] = ()
+        tag_ends: tuple[int, ...] = ()
+        if html_aware:
+            starts: list[int] = []
+            ends: list[int] = []
+            for match in _HTML_TAG_PATTERN.finditer(text):
+                starts.append(match.start())
+                ends.append(match.end())
+            tag_starts = tuple(starts)
+            tag_ends = tuple(ends)
 
-        starts: list[int] = []
-        ends: list[int] = []
-        for match in _HTML_TAG_PATTERN.finditer(text):
-            starts.append(match.start())
-            ends.append(match.end())
-        return cls(tag_starts=tuple(starts), tag_ends=tuple(ends))
+        paired_starts: tuple[int, ...] = ()
+        paired_ends: tuple[int, ...] = ()
+        if quote_aware:
+            paired_starts, paired_ends = _scan_paired_regions(text, _PAIRED_DELIMITERS)
+
+        return cls(
+            tag_starts=tag_starts,
+            tag_ends=tag_ends,
+            paired_starts=paired_starts,
+            paired_ends=paired_ends,
+        )
 
     @property
     def html_aware(self) -> bool:
@@ -116,8 +203,26 @@ class _SplitContext:
         idx = bisect.bisect_left(self.tag_starts, start)
         return idx < len(self.tag_starts) and self.tag_starts[idx] < end
 
+    def pos_inside_paired_region(self, pos: int) -> bool:
+        if not self.paired_starts:
+            return False
+        idx = bisect.bisect_right(self.paired_starts, pos) - 1
+        return idx >= 0 and pos < self.paired_ends[idx]
+
+    def range_overlaps_paired(self, start: int, end: int) -> bool:
+        if not self.paired_starts:
+            return False
+        if self.pos_inside_paired_region(start):
+            return True
+        if end > start and self.pos_inside_paired_region(end - 1):
+            return True
+        idx = bisect.bisect_left(self.paired_starts, start)
+        return idx < len(self.paired_starts) and self.paired_starts[idx] < end
+
     def boundary_allowed(self, start: int, end: int) -> bool:
-        return not self.range_overlaps_tag(start, end)
+        if self.range_overlaps_tag(start, end):
+            return False
+        return not self.range_overlaps_paired(start, end)
 
     def cut_allowed(self, pos: int) -> bool:
         return not self.pos_inside_tag(pos)
@@ -143,6 +248,7 @@ class SparseRegexSentenceSplitter:
         long_sentence_word_threshold: int = 32,
         min_sentence_words: int = 4,
         html_aware: bool = False,
+        quote_aware: bool = False,
     ) -> None:
         if anchor_every_words <= 0:
             raise ValueError("anchor_every_words must be positive")
@@ -158,12 +264,15 @@ class SparseRegexSentenceSplitter:
         self._long_sentence_word_threshold = long_sentence_word_threshold
         self._min_sentence_words = min_sentence_words
         self._html_aware = html_aware
+        self._quote_aware = quote_aware
 
     def split(self, text: str) -> list[Sentence]:
         if not text or not text.strip():
             return []
 
-        context = _SplitContext.from_text(text, html_aware=self._html_aware)
+        context = _SplitContext.from_text(
+            text, html_aware=self._html_aware, quote_aware=self._quote_aware
+        )
         boundaries = _collect_boundaries(text, context)
         spans = _split_spans(text, boundaries)
         spans = _merge_low_signal_spans(text, spans)
