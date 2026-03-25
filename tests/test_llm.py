@@ -91,6 +91,44 @@ class TestTopicRangeLLM:
         assert "</content>" in prompt
         assert kwargs["temperature"] == 0.0
 
+    def test_prompt_includes_output_contract_rules(self) -> None:
+        client = MagicMock()
+        client.call.return_value = "Technology>AI: 0"
+        llm = TopicRangeLLM(client)
+
+        marked_text = MarkedText(tagged_text="{0} Text", sentence_count=1)
+        llm.query(marked_text)
+
+        args, _kwargs = client.call.call_args
+        prompt = args[0]
+        assert 'Use 2-4 levels separated by ">"' in prompt
+        assert "Output ONLY the final topic lines." in prompt
+        assert 'Use ":" only once per line' in prompt
+        marker_rule = (
+            "Every marker ID shown in <content> must belong to exactly one topic line."
+        )
+        assert marker_rule in prompt
+
+    def test_prompt_guides_digest_story_separation(self) -> None:
+        client = MagicMock()
+        client.call.return_value = "Technology>AI: 0"
+        llm = TopicRangeLLM(client)
+
+        marked_text = MarkedText(tagged_text="{0} Text", sentence_count=1)
+        llm.query(marked_text)
+
+        args, _kwargs = client.call.call_args
+        prompt = args[0]
+        digest_rule = "For digest-style article blurbs, use one topic per story/article"
+        assert digest_rule in prompt
+        assert "split them into" in prompt
+        assert "separate sections even if they are thematically related" in prompt
+        specificity_rule = (
+            "Prefer the specific story, comparison, release, review, company move,"
+        )
+        assert specificity_rule in prompt
+        assert "Do NOT treat every newline as a topic boundary." in prompt
+
     def test_custom_temperature_is_forwarded(self) -> None:
         client = MagicMock()
         client.call.return_value = "Technology>AI: 0"
