@@ -5,7 +5,12 @@ from unittest.mock import MagicMock
 import pytest
 
 from txt_splitt.errors import GapError
-from txt_splitt.sentences.gap_handlers import LLMRepairingGapHandler
+from txt_splitt.sentences.gap_handlers import (
+    _GAP_PROMPT_PREFIX,
+    LLMRepairingGapHandler,
+    _build_gap_prompt,
+    _parse_gap_response,
+)
 from txt_splitt.sentences.types import Sentence, SentenceGroup, SentenceRange
 from txt_splitt.tracer import Tracer
 
@@ -18,6 +23,40 @@ def _make_sentences(n: int) -> list[Sentence]:
 
 
 class TestLLMRepairingGapHandler:
+    def test_gap_prompt_forbids_placeholder_new_labels(self) -> None:
+        prompt = _build_gap_prompt(
+            sentence_text="Gap sentence.",
+            prev_label=("Technology", "AI"),
+            prev_context=["Previous context."],
+            next_label=("Business", "Automation"),
+            next_context=["Next context."],
+        )
+
+        assert "NEW is rare." in prompt
+        assert "2-4 levels separated by '>'." in prompt
+        assert "top level should be a broad domain such as" in prompt
+        assert "lowest level should identify the specific subject" in prompt
+        assert "Use official capitalization and canonical names" in prompt
+        assert "Reply with exactly one line and no explanation." in prompt
+        assert "NEW: Actual>Concrete>TopicPath" in prompt
+        assert "NEW: Level1>Level2>Topic" in prompt
+        assert "NEW: Category>Subcategory>Topic" in prompt
+
+    def test_gap_prompt_uses_stable_prefix_for_kv_cache(self) -> None:
+        prompt = _build_gap_prompt(
+            sentence_text="Gap sentence.",
+            prev_label=("Technology", "AI"),
+            prev_context=["Previous context."],
+            next_label=("Business", "Automation"),
+            next_context=["Next context."],
+        )
+
+        assert prompt.startswith(_GAP_PROMPT_PREFIX)
+        suffix = prompt.removeprefix(_GAP_PROMPT_PREFIX)
+        assert '<OPTION_A label="Technology>AI">' in suffix
+        assert "<GAP>Gap sentence.</GAP>" in suffix
+        assert '<OPTION_B label="Business>Automation">' in suffix
+
     def test_gap_between_same_neighbor_owner_skips_llm(self) -> None:
         client = MagicMock()
         handler = LLMRepairingGapHandler(client)
@@ -123,6 +162,12 @@ class TestLLMRepairingGapHandler:
         assert len(result) == 3
         assert result[2].label == ("Technology", "AI", "Agentic Workflows")
         assert result[2].ranges == (SentenceRange(1, 1),)
+
+    def test_parse_gap_response_keeps_non_empty_new_label(self) -> None:
+        decision, label = _parse_gap_response("NEW: Category>Subcategory>Topic")
+
+        assert decision == "new"
+        assert label == ("Category", "Subcategory", "Topic")
 
     def test_ambiguous_response_defaults_to_previous(self) -> None:
         client = MagicMock()
