@@ -122,7 +122,7 @@ class TestTopicRangeLLM:
         digest_rule = "For digest-style article blurbs, use one topic per story/article"
         assert digest_rule in prompt
         assert "split them into" in prompt
-        assert "separate sections even if they are thematically related" in prompt
+        assert "separate sections with DISTINCT topic labels" in prompt
         specificity_rule = (
             "Prefer the specific story, comparison, release, review, company move,"
         )

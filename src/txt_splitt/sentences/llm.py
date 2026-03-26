@@ -517,6 +517,19 @@ def _topic_naming_rules() -> str:
 - Version format: "Name X.Y" when a version matters; drop patch versions.
 - Keep segments short, noun-phrase-like, and searchable.
 
+NAMED COMPONENTS AND ROLES (CRITICAL):
+- When a section discusses a specific named component, role, feature, or entity,
+  use that exact name as the lowest-level topic.
+- Do NOT replace specific component names with generic labels like "AI", "Workflow",
+  or "System" — use the actual name from the text.
+- Named components should be identifiable and searchable by their proper names.
+
+PRODUCT-CENTRIC DOCUMENTS:
+- If the entire document focuses on a specific product, tool, or system, use that
+  name as a consistent second-level category throughout the document.
+- This creates a coherent hierarchy: Domain > Product > Component/Feature.
+- Do NOT vary the second-level category for the same product across sections.
+
 GOOD LABELS:
 - Technology>AI>Coding Models Comparison
 - Technology>AI>Codex App
@@ -524,6 +537,21 @@ GOOD LABELS:
 - Technology>Support AI>Board Game Training
 - Metadata>Newsletter Header
 - Metadata>Advertisement
+
+GOOD LABELS (specific named components as lowest level):
+- Technology>Kubernetes>etcd
+- Technology>Kubernetes>kubelet
+- Technology>React>Hooks
+- Technology>React>Context API
+- Technology>PostgreSQL>WAL
+- Technology>VS Code>Extensions API
+
+GOOD LABELS (product-centric with consistent second level):
+- Technology>Docker>Container Runtime
+- Technology>Docker>Image Layers
+- Technology>Docker>Networking
+- Technology>Temporal>Workflows
+- Technology>Temporal>Activities
 
 GOOD DIGEST LABELS (different articles get different specific topics):
 - Technology>Smartphones>iPhone 16 Launch
@@ -538,6 +566,11 @@ BAD LABELS (For actual articles/stories):
 - AI News
 - Miscellaneous
 
+BAD LABELS (generic instead of specific component names):
+- Technology>Containers>Storage (should use the actual component name, e.g., Technology>Kubernetes>etcd)
+- Technology>Frontend>State Management (should be Technology>React>Context API)
+- Technology>Database>Logging (should be Technology>PostgreSQL>WAL)
+
 BAD DIGEST LABELS (same generic label reused for different articles):
 - Technology>Smartphones>Phone News (repeated for 3 different phone articles)
 - Technology>Product Updates (repeated for unrelated product launches)
@@ -547,8 +580,9 @@ BAD DIGEST LABELS (same generic label reused for different articles):
 def _conciseness_rules() -> str:
     return """CONCISENESS RULES (CRITICAL FOR PERFORMANCE):
 - Do NOT copy or quote exact sentences from the input text in your reasoning or output.
+- Never summarize or list out markers one-by-one (e.g., do not write "0: intro, 1: heading...").
 - If you need to refer to content, use the sentence marker IDs (e.g., "sentences 4-8") or extremely short abstractions (e.g., "discussion of indexing").
-- Keep any reasoning minimal — use marker IDs and short abstractions, never quote the input text."""
+- Keep any reasoning minimal and high-level, never quote the input text."""
 
 
 def _build_topic_ranges_base_prompt(tagged_text: str) -> str:
@@ -565,15 +599,20 @@ Partition the markers into distinct topical sections and assign one
 searchable hierarchical topic path to each section.
 
 PROCESS (follow in order):
-1. Read all markers and group adjacent markers into coherent sections.
-2. If a digest/post contains multiple different stories, split them into
+1. Read all markers and identify if the document focuses on a specific product,
+   tool, or system. If so, use that name as a consistent second-level category
+   throughout the document.
+2. Group adjacent markers into coherent sections based on topic shifts.
+3. For each section, identify any named components, roles, features, or entities
+   being discussed. Use these specific names as the lowest-level topic.
+4. If a digest/post contains multiple different stories, split them into
    separate sections with DISTINCT topic labels—even if thematically related.
    Each article/story must have its own specific topic reflecting its unique subject.
-3. If later markers clearly return to the same story, reuse the same topic
+5. If later markers clearly return to the same story, reuse the same topic
    path and emit multiple ranges on that line.
-4. Name each section with one canonical topic path.
-5. Output the final topic lines. You may reason briefly first, but the
-   final answer must contain ONLY topic lines.
+6. Name each section with one canonical topic path.
+7. Output the final topic lines. Keep any reasoning strictly high-level and brief.
+   The final answer must contain ONLY topic lines.
 
 {_topic_naming_rules()}
 
@@ -581,6 +620,8 @@ COVERAGE RULES:
 - Every marker ID shown in <content> must belong to exactly one topic line.
 - Do not overlap ranges between topics.
 - Do not skip markers.
+- If a single marker contains multiple distinct topics, assign it to the most prominent one. Do not overthink edge cases where topics overlap within a single sentence.
+- Feel free to broadly group CSS/UI text sections without granular analysis.
 - Consecutive markers that continue one idea should stay in the same section
   even if split by newline formatting.
 - Group short transitional phrases and standalone links (e.g. "Read more", "Listen here")
