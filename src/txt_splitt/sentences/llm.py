@@ -506,6 +506,8 @@ def _topic_naming_rules() -> str:
   product, person, or use case over a broad umbrella label.
 - For digest-style article blurbs, use one topic per story/article, not one
   topic for the whole digest.
+- For digest newsletters with multiple article blurbs, differentiate topics by
+  the specific article subject. Do NOT reuse the same generic label for different articles.
 - Use official capitalization and canonical names for products, companies,
   people, and technologies.
 - Version format: "Name X.Y" when a version matters; drop patch versions.
@@ -517,12 +519,22 @@ GOOD LABELS:
 - Business>Consulting>Automation
 - Technology>Support AI>Board Game Training
 
+GOOD DIGEST LABELS (different articles get different specific topics):
+- Technology>Smartphones>iPhone 16 Launch
+- Technology>Smartphones>Android 15 Features
+- Technology>Wearables>Apple Watch Ultra Review
+- Technology>Wearables>Samsung Galaxy Watch Update
+
 BAD LABELS:
 - News
 - Update
 - Technology
 - AI News
 - Miscellaneous
+
+BAD DIGEST LABELS (same generic label reused for different articles):
+- Technology>Smartphones>Phone News (repeated for 3 different phone articles)
+- Technology>Product Updates (repeated for unrelated product launches)
 """
 
 
@@ -549,7 +561,8 @@ searchable hierarchical topic path to each section.
 PROCESS (follow in order):
 1. Read all markers and group adjacent markers into coherent sections.
 2. If a digest/post contains multiple different stories, split them into
-   separate sections even if they are thematically related.
+   separate sections with DISTINCT topic labels—even if thematically related.
+   Each article/story must have its own specific topic reflecting its unique subject.
 3. If later markers clearly return to the same story, reuse the same topic
    path and emit multiple ranges on that line.
 4. Name each section with one canonical topic path.
@@ -564,7 +577,8 @@ COVERAGE RULES:
 - Do not skip markers.
 - Consecutive markers that continue one idea should stay in the same section
   even if split by newline formatting.
-- Be granular: separate clearly different stories or subjects.
+- Be granular: separate clearly different stories or subjects with DISTINCT labels.
+- Avoid reusing the same topic label for adjacent sections—differentiate by specific subject.
 
 {_conciseness_rules()}
 
