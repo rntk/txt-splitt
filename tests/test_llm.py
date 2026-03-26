@@ -102,7 +102,7 @@ class TestTopicRangeLLM:
         args, _kwargs = client.call.call_args
         prompt = args[0]
         assert 'Use 2-4 levels separated by ">"' in prompt
-        assert "Output ONLY the final topic lines." in prompt
+        assert "final answer must contain ONLY topic lines." in prompt
         assert 'Use ":" only once per line' in prompt
         marker_rule = (
             "Every marker ID shown in <content> must belong to exactly one topic line."
@@ -492,8 +492,8 @@ class TestTopicRangeAssignmentLLM:
         prompt_2 = client.call.call_args_list[1][0][0]
 
         # Everything before the topic line should be identical
-        prefix_1 = prompt_1.rsplit("Assign sentence ranges for this topic:\n", 1)[0]
-        prefix_2 = prompt_2.rsplit("Assign sentence ranges for this topic:\n", 1)[0]
+        prefix_1 = prompt_1.rsplit("Assign marker ranges for this topic:\n", 1)[0]
+        prefix_2 = prompt_2.rsplit("Assign marker ranges for this topic:\n", 1)[0]
         assert prefix_1 == prefix_2
 
     def test_none_response_skips_topic(self) -> None:
@@ -715,8 +715,7 @@ class TestTopicRangeAssignmentLLM:
                 assert "<content>" in child.attributes["prompt"]
                 assert "</content>" in child.attributes["prompt"]
                 assert (
-                    "Assign sentence ranges for this topic:"
-                    in child.attributes["prompt"]
+                    "Assign marker ranges for this topic:" in child.attributes["prompt"]
                 )
 
         asyncio.run(run_test())
