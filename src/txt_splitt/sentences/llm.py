@@ -498,7 +498,8 @@ def _topic_naming_rules() -> str:
     return """TOPIC NAMING RULES:
 - Use 2-4 levels separated by ">".
 - Top level should be a broad domain such as Technology, Business, Science,
-  Politics, Health, Culture, or Sport.
+  Politics, Health, Culture, or Sport (this is not a strict list; feel free to
+  use other broad categories if they fit better).
 - Lowest level should identify the specific subject of that section.
 - Use fewer levels for broad coverage; add levels only to disambiguate
   sections that share a parent topic.
