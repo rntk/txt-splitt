@@ -504,6 +504,9 @@ def _topic_naming_rules() -> str:
   sections that share a parent topic.
 - Prefer the specific story, comparison, release, review, company move,
   product, person, or use case over a broad umbrella label.
+- For structural content like newsletters, headers, footers, advertisements,
+  unsubscribe links, or UI text, DO NOT try to force a domain like "Technology" or "Business".
+  Instead, use a strict "Metadata" top-level prefix (e.g. Metadata>Newsletter Header).
 - For digest-style article blurbs, use one topic per story/article, not one
   topic for the whole digest.
 - For digest newsletters with multiple article blurbs, differentiate topics by
@@ -518,6 +521,8 @@ GOOD LABELS:
 - Technology>AI>Codex App
 - Business>Consulting>Automation
 - Technology>Support AI>Board Game Training
+- Metadata>Newsletter Header
+- Metadata>Advertisement
 
 GOOD DIGEST LABELS (different articles get different specific topics):
 - Technology>Smartphones>iPhone 16 Launch
@@ -525,7 +530,7 @@ GOOD DIGEST LABELS (different articles get different specific topics):
 - Technology>Wearables>Apple Watch Ultra Review
 - Technology>Wearables>Samsung Galaxy Watch Update
 
-BAD LABELS:
+BAD LABELS (For actual articles/stories):
 - News
 - Update
 - Technology
@@ -577,6 +582,8 @@ COVERAGE RULES:
 - Do not skip markers.
 - Consecutive markers that continue one idea should stay in the same section
   even if split by newline formatting.
+- Group short transitional phrases and standalone links (e.g. "Read more", "Listen here")
+  with the adjacent section they belong to.
 - Be granular: separate clearly different stories or subjects with DISTINCT labels.
 - Avoid reusing the same topic label for adjacent sections—differentiate by specific subject.
 
