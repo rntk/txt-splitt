@@ -4,6 +4,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
+import pytest
+
 from split_text import build_cache_store, create_pipeline, wrap_async_llm, wrap_sync_llm
 from txt_splitt import (
     CachingAsyncLLMCallable,
@@ -14,12 +16,7 @@ from txt_splitt import (
     TracingLLMCallable,
 )
 from txt_splitt.sentences import (
-    BoundaryEvaluator,
-    LLMRepairingGapHandler,
-    ShortSentenceEnhancer,
-    TopicListLLM,
-    TopicRangeAssignmentLLM,
-    TopicRangeLLM,
+    HierarchicalTopicRangeLLM,
 )
 
 
@@ -96,52 +93,8 @@ def test_wrap_async_llm_applies_cache_before_tracing(tmp_path: Path) -> None:
     assert wrapped._inner._namespace == "topic-range-assignment"
 
 
-def test_create_pipeline_assigns_distinct_cache_namespaces(tmp_path: Path) -> None:
-    args = _make_args(cache_db=str(tmp_path / "cache.sqlite"))
-    pipeline = create_pipeline(
-        args,
-        Path("input.txt"),
-        StubLLM(),
-        AsyncStubLLM(),
-        Tracer(),
-        build_cache_store(args),
-    )
-
-    assert isinstance(pipeline._topic_extractor, TopicListLLM)
-    assert isinstance(pipeline._topic_extractor._client, TracingLLMCallable)
-    topic_list_client = cast(
-        CachingLLMCallable, pipeline._topic_extractor._client._inner
-    )
-    assert topic_list_client._namespace == "topic-list"
-
-    assert isinstance(pipeline._range_assigner, TopicRangeAssignmentLLM)
-    assert isinstance(pipeline._range_assigner._client, TracingAsyncLLMCallable)
-    range_assigner_client = cast(
-        CachingAsyncLLMCallable, pipeline._range_assigner._client._inner
-    )
-    assert range_assigner_client._namespace == "topic-range-assignment"
-
-    assert isinstance(pipeline._gap_handler, LLMRepairingGapHandler)
-    assert isinstance(pipeline._gap_handler._client, TracingLLMCallable)
-    gap_repair_client = cast(CachingLLMCallable, pipeline._gap_handler._client._inner)
-    assert gap_repair_client._namespace == "gap-repair"
-
-    assert len(pipeline._enhancers) == 2
-    first_enhancer = pipeline._enhancers[0]
-    second_enhancer = pipeline._enhancers[1]
-    assert isinstance(first_enhancer, ShortSentenceEnhancer)
-    assert isinstance(first_enhancer._client, TracingLLMCallable)
-    short_sentence_client = cast(CachingLLMCallable, first_enhancer._client._inner)
-    assert short_sentence_client._namespace == "short-sentence-enhancer"
-    assert isinstance(second_enhancer, BoundaryEvaluator)
-    assert isinstance(second_enhancer._client, TracingLLMCallable)
-    boundary_client = cast(CachingLLMCallable, second_enhancer._client._inner)
-    assert boundary_client._namespace == "boundary-evaluator"
-
-
-def test_create_pipeline_uses_topic_range_namespace_in_single_stage(
-    tmp_path: Path,
-) -> None:
+def test_create_pipeline_uses_single_stage_only(tmp_path: Path) -> None:
+    """Two-stage pipeline is no longer supported - only single-stage works."""
     args = _make_args(
         cache_db=str(tmp_path / "cache.sqlite"),
         short_sentence_min_length=0,
@@ -156,7 +109,23 @@ def test_create_pipeline_uses_topic_range_namespace_in_single_stage(
         cache_store=build_cache_store(args),
     )
 
-    assert isinstance(pipeline._llm, TopicRangeLLM)
+    assert isinstance(pipeline._llm, HierarchicalTopicRangeLLM)
     assert isinstance(pipeline._llm._client, TracingLLMCallable)
     topic_range_client = cast(CachingLLMCallable, pipeline._llm._client._inner)
     assert topic_range_client._namespace == "topic-range"
+
+
+def test_create_pipeline_two_stage_raises_not_implemented(tmp_path: Path) -> None:
+    """Two-stage pipeline (single_stage=False) raises NotImplementedError."""
+    args = _make_args(
+        cache_db=str(tmp_path / "cache.sqlite"),
+        single_stage=False,
+    )
+    with pytest.raises(NotImplementedError, match="Two-stage pipeline"):
+        create_pipeline(
+            args,
+            Path("input.txt"),
+            StubLLM(),
+            tracer=Tracer(),
+            cache_store=build_cache_store(args),
+        )

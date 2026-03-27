@@ -17,7 +17,7 @@ from txt_splitt.cache import (
     SQLiteLLMCacheStore,
 )
 from txt_splitt.sentences.gap_handlers import LLMRepairingGapHandler
-from txt_splitt.sentences.llm import TopicRangeAssignmentLLM, TopicRangeLLM
+from txt_splitt.sentences.llm import TopicRangeLLM
 from txt_splitt.sentences.types import (
     MarkedText,
     Sentence,
@@ -246,26 +246,6 @@ class TestCacheIntegration:
         assert llm.query(marked_text) == "Topic: 0-1"
         assert llm.query(marked_text) == "Topic: 0-1"
         inner.call.assert_called_once()
-
-    def test_topic_range_assignment_llm_uses_cached_client(self) -> None:
-        inner = MagicMock()
-        inner.call.side_effect = ["0-1", "2-3"]
-        client = CachingLLMCallable(
-            inner,
-            MemoryLLMCacheStore(),
-            namespace="topic-range-assignment",
-            prompt_version="v1",
-        )
-        llm = TopicRangeAssignmentLLM(client)
-        marked_text = MarkedText(tagged_text="{0} A\n{1} B", sentence_count=2)
-        topics = ["Technology>AI", "Environment>Climate"]
-
-        first = llm.assign(marked_text, topics)
-        second = llm.assign(marked_text, topics)
-
-        assert first == "Technology>AI: 0-1\nEnvironment>Climate: 2-3"
-        assert second == first
-        assert inner.call.call_count == 2
 
     def test_gap_handler_uses_cached_client(self) -> None:
         inner = MagicMock()

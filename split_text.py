@@ -32,6 +32,7 @@ from txt_splitt.sentences import (
     AdjacentSameTopicJoiner,
     BoundaryEvaluator,
     BracketMarker,
+    HierarchicalTopicRangeLLM,
     LLMRepairingGapHandler,
     MappingOffsetRestorer,
     OptimizingMarker,
@@ -39,10 +40,6 @@ from txt_splitt.sentences import (
     SentencePipeline,
     ShortSentenceEnhancer,
     SparseRegexSentenceSplitter,
-    HierarchicalTopicRangeLLM,
-    TopicListLLM,
-    TopicRangeAssignmentLLM,
-    TopicRangeLLM,
     TopicRangeParser,
     build_pipeline,
 )
@@ -552,7 +549,6 @@ def create_pipeline(
     args: Any,
     input_path: Path,
     sync_llm: LLMCallable,
-    async_llm: AsyncLLMCallable | None = None,
     tracer: Tracer | None = None,
     cache_store: SQLiteLLMCacheStore | None = None,
 ) -> SentencePipeline:
@@ -560,13 +556,6 @@ def create_pipeline(
     topic_range_llm = wrap_sync_llm(
         sync_llm,
         namespace="topic-range",
-        args=args,
-        tracer=tracer,
-        cache_store=cache_store,
-    )
-    topic_list_llm = wrap_sync_llm(
-        sync_llm,
-        namespace="topic-list",
         args=args,
         tracer=tracer,
         cache_store=cache_store,
@@ -658,56 +647,11 @@ def create_pipeline(
             offset_restorer=offset_restorer,
             tracer=tracer,
         )
-    else:
-        max_concurrent_requests = args.max_concurrent if async_llm is not None else 1
-        range_assigner_client: LLMCallable | AsyncLLMCallable
-        if async_llm is not None:
-            range_assigner_client = wrap_async_llm(
-                async_llm,
-                namespace="topic-range-assignment",
-                args=args,
-                tracer=tracer,
-                cache_store=cache_store,
-            )
-        else:
-            range_assigner_client = wrap_sync_llm(
-                sync_llm,
-                namespace="topic-range-assignment",
-                args=args,
-                tracer=tracer,
-                cache_store=cache_store,
-            )
-        return build_pipeline(
-            splitter=splitter,
-            marker=OptimizingMarker(BracketMarker()),
-            topic_extractor=TopicListLLM(
-                client=topic_list_llm,
-                temperature=args.temperature,
-                chunker=OverlapChunker(max_chars=args.max_chunk_chars),
-                tracer=tracer,
-                retry_policy=retry_policy,
-            ),
-            range_assigner=TopicRangeAssignmentLLM(
-                client=range_assigner_client,
-                temperature=args.temperature,
-                chunker=OverlapChunker(max_chars=args.max_chunk_chars),
-                max_concurrent_requests=max_concurrent_requests,
-                output_mode=output_mode,
-                tracer=tracer,
-                retry_policy=retry_policy,
-            ),
-            parser=TopicRangeParser(input_mode=parser_mode),
-            gap_handler=LLMRepairingGapHandler(
-                gap_repair_llm,
-                temperature=args.temperature,
-                tracer=tracer,
-            ),
-            enhancers=enhancers,
-            joiner=AdjacentSameTopicJoiner(),
-            html_cleaner=html_cleaner,
-            offset_restorer=offset_restorer,
-            tracer=tracer,
-        )
+    msg = (
+        "Two-stage pipeline (without --single-stage) is no longer supported "
+        "after removing TopicListLLM and TopicRangeAssignmentLLM."
+    )
+    raise NotImplementedError(msg)
 
 
 def run_sync(args: Any) -> None:
@@ -768,23 +712,19 @@ async def run_async(args: Any) -> None:
 
     sync_llm_client = LLamaCPP(host=args.host, model=args.model)
     sync_llm_adapter = LLamaCPPAdapter(sync_llm_client)
-    async_llm_client = AsyncLLamaCPP(host=args.host, model=args.model)
-    async_llm_adapter = AsyncLLamaCPPAdapter(async_llm_client)
 
     tracer: Tracer | None = Tracer() if args.trace else None
     sync_llm_callable: LLMCallable = RetryingLLMCallable(
         sync_llm_adapter, max_retries=3, backoff_factor=1.0
     )
-    async_llm_callable: AsyncLLMCallable = async_llm_adapter
     cache_store = build_cache_store(args)
 
     pipeline = create_pipeline(
         args,
         input_path,
         sync_llm_callable,
-        async_llm_callable,
-        tracer,
-        cache_store,
+        tracer=tracer,
+        cache_store=cache_store,
     )
 
     print(
