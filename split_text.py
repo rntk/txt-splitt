@@ -92,7 +92,7 @@ def wrap_sync_llm(
             cache_store,
             namespace=namespace,
             model_id=str(args.model),
-            prompt_version="split_text_v1",
+            prompt_version="split_text_v2",
             cache_nonzero_temperature=bool(args.cache_nonzero_temperature),
         )
     if tracer is not None:
@@ -116,7 +116,7 @@ def wrap_async_llm(
             cache_store,
             namespace=namespace,
             model_id=str(args.model),
-            prompt_version="split_text_v1",
+            prompt_version="split_text_v2",
             cache_nonzero_temperature=bool(args.cache_nonzero_temperature),
         )
     if tracer is not None:
