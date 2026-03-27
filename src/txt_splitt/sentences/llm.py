@@ -7,14 +7,16 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import re
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Literal
 
-from txt_splitt.errors import LLMError
+from txt_splitt.errors import LLMError, ParseError
 from txt_splitt.llms.utils import looks_repetitive
 from txt_splitt.protocols import AsyncLLMCallable, LLMCallable
 from txt_splitt.retry import RetryPolicy, execute_with_retry
-from txt_splitt.sentences.types import MarkedText
+from txt_splitt.sentences.parsers import TopicRangeParser
+from txt_splitt.sentences.types import MarkedText, SentenceGroup, SentenceRange
 from txt_splitt.tracer import NoOpTracer
 
 if TYPE_CHECKING:
@@ -810,3 +812,464 @@ OUTPUT FORMAT:
 
 Example: [{{"start": 0, "end": 5}}, {{"start": 10, "end": 15}}]
 """
+
+
+_MARKER_ID_RE: re.Pattern[str] = re.compile(r"^\{(\d+)\}")
+
+
+def _extract_lines_by_range(tagged_text: str, ranges: list[SentenceRange]) -> str:
+    """Return only the tagged_text lines whose {N} marker falls in any range."""
+    if not ranges:
+        return ""
+    allowed: set[int] = set()
+    for r in ranges:
+        allowed.update(range(r.start, r.end + 1))
+    selected: list[str] = []
+
+    current_allowed = False
+    for line in tagged_text.split("\n"):
+        m = _MARKER_ID_RE.match(line)
+        if m:
+            current_allowed = int(m.group(1)) in allowed
+
+        if current_allowed:
+            selected.append(line)
+    return "\n".join(selected)
+
+
+def _build_coarse_topic_ranges_prompt(tagged_text: str) -> str:
+    return f"""You are analyzing text where each line starts with a sentence marker
+{{N}}.
+Marker IDs are globally 0-indexed in the source document.
+The current input may be a chunk, so marker IDs might not start at 0.
+Always use the exact marker IDs shown in <content>.
+
+{_prompt_preamble()}
+
+TASK:
+Partition ALL markers into a small number of HIGH-LEVEL topical sections.
+Produce broad, chapter-level groupings — do NOT identify fine-grained subtopics.
+
+PROCESS (follow in order):
+1. Scan the full text and identify major thematic shifts.
+2. Group large consecutive blocks of markers into broad sections.
+3. Prefer fewer, larger sections over many small ones (aim for 3-10 sections total).
+4. Name each section with a 1-2 level topic path only (e.g. "Technology>AI" not
+   "Technology>AI>GPT-4 Release Details").
+
+COVERAGE RULES:
+- Every marker ID shown in <content> must belong to at least one topic line.
+- Do not skip markers.
+- Consecutive markers on the same broad theme MUST stay together.
+
+{_conciseness_rules()}
+
+OUTPUT RULES:
+- Exactly one topic path per line.
+- Use ":" only once per line, immediately before the sentence ranges.
+- Do NOT use ":" inside topic path segments.
+- Sort lines by their first marker ID in ascending order.
+- Output no bullets, numbering, commentary, markdown fences, or explanations.
+
+LINE FORMAT:
+Category>BroadTopic: MarkerRanges
+
+MarkerRanges can be:
+- Single range: 12-18
+- Multiple ranges: 12-18, 33-36
+- Individual markers: 12, 15, 18
+- Mixed: 12-18, 21, 24-27
+
+<content>
+{tagged_text}
+</content>
+"""
+
+
+def _build_coarse_topic_ranges_json_prompt(tagged_text: str) -> str:
+    schema = json.dumps(_topic_ranges_json_schema(), indent=2)
+    return f"""You are analyzing text where each line starts with a sentence marker
+{{N}}.
+Marker IDs are globally 0-indexed in the source document.
+The current input may be a chunk, so marker IDs might not start at 0.
+Always use the exact marker IDs shown in <content>.
+
+{_prompt_preamble()}
+
+TASK:
+Partition ALL markers into a small number of HIGH-LEVEL topical sections.
+Produce broad, chapter-level groupings — do NOT identify fine-grained subtopics.
+
+PROCESS (follow in order):
+1. Scan the full text and identify major thematic shifts.
+2. Group large consecutive blocks of markers into broad sections.
+3. Prefer fewer, larger sections over many small ones (aim for 3-10 sections total).
+4. Name each section with a 1-2 level topic path only (e.g. ["Technology", "AI"] not
+   ["Technology", "AI", "GPT-4 Release Details"]).
+
+COVERAGE RULES:
+- Every marker ID shown in <content> must belong to at least one topic entry.
+- Do not skip markers.
+- Consecutive markers on the same broad theme MUST stay together.
+
+{_conciseness_rules()}
+
+<content>
+{tagged_text}
+</content>
+
+OUTPUT RULES:
+- Return ONLY valid JSON that matches this schema.
+- Do not wrap in markdown fences.
+- Do not add any prose or explanation.
+
+JSON SCHEMA:
+{schema}
+"""
+
+
+def _build_refine_subtopics_prompt(tagged_text: str, parent_topic: str) -> str:
+    return f"""You are analyzing a section of text where each line starts with a
+sentence marker {{N}}.
+Marker IDs are from the ORIGINAL document — use the exact IDs shown; they
+are NOT necessarily 0-based.
+
+{_prompt_preamble()}
+
+TASK:
+Within this section, identify distinct subtopics and assign detailed hierarchical
+topic paths. All topic paths MUST start with the given PARENT TOPIC followed by
+">" and 1-2 additional levels of specificity.
+Prefer fewer, broader subtopics over many small ones. Short transitional
+sentences, calls-to-action ("Read this", "Switch now", "Learn why"), teasers,
+and standalone links must be merged into the adjacent substantive subtopic —
+never their own subtopic.
+
+{_topic_naming_rules()}
+
+COVERAGE RULES:
+- Every marker ID shown in <content> must belong to exactly one topic line.
+- Do not overlap ranges between topics.
+- Do not skip markers.
+- Use the exact marker IDs shown (original document IDs, not necessarily 0-based).
+- Consecutive markers on the same subtopic MUST stay together.
+
+GROUPING RULES:
+- Each subtopic MUST contain enough sentences to be understandable on its own
+  without surrounding context. If a group of sentences only makes sense as part
+  of a larger discussion, merge them into that larger subtopic.
+- Short transitional phrases, calls-to-action (e.g. "Read this", "Switch now",
+  "Learn why"), teasers, and standalone links are NOT separate subtopics —
+  always group them with the substantive section they introduce or conclude.
+- Aim for 2-5 subtopics per section. If you would produce more, merge the
+  smallest groups into their nearest neighbor.
+- A subtopic with fewer than 3 sentences should usually be merged into an
+  adjacent subtopic unless it covers a clearly distinct subject.
+
+{_conciseness_rules()}
+
+OUTPUT RULES:
+- Exactly one topic path per line.
+- All paths MUST start with the PARENT TOPIC value followed by ">".
+- Use ":" only once per line, immediately before the sentence ranges.
+- Do NOT use ":" inside topic path segments.
+- Sort lines by their first marker ID in ascending order.
+- Output no bullets, numbering, commentary, markdown fences, or explanations.
+
+LINE FORMAT:
+PARENT_TOPIC>SpecificSubtopic: MarkerRanges
+
+MarkerRanges can be:
+- Single range: 12-18
+- Multiple ranges: 12-18, 33-36
+- Individual markers: 12, 15, 18
+- Mixed: 12-18, 21, 24-27
+
+PARENT TOPIC: {parent_topic}
+
+<content>
+{tagged_text}
+</content>
+"""
+
+
+def _build_refine_subtopics_json_prompt(tagged_text: str, parent_topic: str) -> str:
+    schema = json.dumps(_topic_ranges_json_schema(), indent=2)
+    return f"""You are analyzing a section of text where each line starts with a
+sentence marker {{N}}.
+Marker IDs are from the ORIGINAL document — use the exact IDs shown; they
+are NOT necessarily 0-based.
+
+{_prompt_preamble()}
+
+TASK:
+Within this section, identify distinct subtopics and assign detailed hierarchical
+topic paths. All label arrays MUST start with the given PARENT TOPIC segments
+followed by 1-2 additional specificity levels.
+Prefer fewer, broader subtopics over many small ones. Short transitional
+sentences, calls-to-action ("Read this", "Switch now", "Learn why"), teasers,
+and standalone links must be merged into the adjacent substantive subtopic —
+never their own subtopic.
+
+{_topic_naming_rules()}
+
+COVERAGE RULES:
+- Every marker ID shown in <content> must belong to exactly one topic entry.
+- Do not overlap ranges between topics.
+- Do not skip markers.
+- Use the exact marker IDs shown (original document IDs, not necessarily 0-based).
+
+GROUPING RULES:
+- Each subtopic MUST contain enough sentences to be understandable on its own
+  without surrounding context. If a group of sentences only makes sense as part
+  of a larger discussion, merge them into that larger subtopic.
+- Short transitional phrases, calls-to-action (e.g. "Read this", "Switch now",
+  "Learn why"), teasers, and standalone links are NOT separate subtopics —
+  always group them with the substantive section they introduce or conclude.
+- Aim for 2-5 subtopics per section. If you would produce more, merge the
+  smallest groups into their nearest neighbor.
+- A subtopic with fewer than 3 sentences should usually be merged into an
+  adjacent subtopic unless it covers a clearly distinct subject.
+
+{_conciseness_rules()}
+
+OUTPUT RULES:
+- Return ONLY valid JSON that matches this schema.
+- Do not wrap in markdown fences.
+- Do not add any prose or explanation.
+
+JSON SCHEMA:
+{schema}
+
+PARENT TOPIC: {parent_topic}
+
+<content>
+{tagged_text}
+</content>
+"""
+
+
+class HierarchicalTopicRangeLLM:
+    """Two-stage hierarchical topic splitting implementing LLMStrategy.
+
+    Stage 1 asks the LLM to produce broad, high-level topics and large ranges
+    covering the whole document.  Stage 2 takes each coarse range, extracts
+    only those lines, and asks the LLM to refine them into detailed subtopics.
+
+    The merged result is returned as a single string that ``TopicRangeParser``
+    can parse without modification.
+
+    For documents below ``min_sentences_for_hierarchical`` the class falls back
+    to a standard single-stage call using the existing full-detail prompt.
+    """
+
+    def __init__(
+        self,
+        client: LLMCallable,
+        *,
+        temperature: float = 0.0,
+        chunker: "MarkedTextChunker | None" = None,
+        output_mode: Literal["text", "json"] = "text",
+        max_response_chars: int = 50_000,
+        retry_policy: RetryPolicy | None = None,
+        min_sentences_for_hierarchical: int = 80,
+        coarse_prompt_builder: Callable[[str], str] | None = None,
+        refine_prompt_builder: Callable[[str, str], str] | None = None,
+    ) -> None:
+        if output_mode not in {"text", "json"}:
+            msg = f"output_mode must be 'text' or 'json', got {output_mode!r}"
+            raise ValueError(msg)
+        if max_response_chars <= 0:
+            msg = f"max_response_chars must be > 0, got {max_response_chars}"
+            raise ValueError(msg)
+        if min_sentences_for_hierarchical <= 0:
+            msg = (
+                "min_sentences_for_hierarchical must be > 0, "
+                f"got {min_sentences_for_hierarchical}"
+            )
+            raise ValueError(msg)
+        self._client = client
+        self._temperature = temperature
+        self._chunker = chunker
+        self._output_mode = output_mode
+        self._max_response_chars = max_response_chars
+        self._retry_policy = retry_policy
+        self._min_sentences = min_sentences_for_hierarchical
+        self._coarse_prompt_builder = coarse_prompt_builder
+        self._refine_prompt_builder = refine_prompt_builder
+
+    @property
+    def response_format(self) -> Literal["text", "json"]:
+        return self._output_mode
+
+    def query(self, marked_text: MarkedText) -> str:
+        """Implements LLMStrategy.query."""
+        if marked_text.sentence_count < self._min_sentences:
+            return self._single_stage(marked_text)
+        return self._hierarchical(marked_text)
+
+    # ------------------------------------------------------------------
+    # Single-stage fallback (small documents)
+    # ------------------------------------------------------------------
+
+    def _single_stage(self, marked_text: MarkedText) -> str:
+        if self._output_mode == "json":
+            prompt = (
+                self._coarse_prompt_builder(marked_text.tagged_text)
+                if self._coarse_prompt_builder is not None
+                else _build_topic_ranges_json_prompt(marked_text.tagged_text)
+            )
+        else:
+            prompt = (
+                self._coarse_prompt_builder(marked_text.tagged_text)
+                if self._coarse_prompt_builder is not None
+                else _build_topic_ranges_prompt(marked_text.tagged_text)
+            )
+        return self._call_llm(prompt)
+
+    # ------------------------------------------------------------------
+    # Two-stage hierarchical path (large documents)
+    # ------------------------------------------------------------------
+
+    def _hierarchical(self, marked_text: MarkedText) -> str:
+        coarse_response = self._stage1_coarse(marked_text)
+        coarse_groups = self._parse_coarse(coarse_response, marked_text.sentence_count)
+
+        if self._output_mode == "json":
+            return self._collect_json(marked_text.tagged_text, coarse_groups)
+        return self._collect_text(marked_text.tagged_text, coarse_groups)
+
+    def _stage1_coarse(self, marked_text: MarkedText) -> str:
+        chunks = (
+            self._chunker.chunk(marked_text)
+            if self._chunker is not None
+            else [marked_text]
+        )
+        responses: list[str] = []
+        for chunk in chunks:
+            if self._output_mode == "json":
+                prompt = (
+                    self._coarse_prompt_builder(chunk.tagged_text)
+                    if self._coarse_prompt_builder is not None
+                    else _build_coarse_topic_ranges_json_prompt(chunk.tagged_text)
+                )
+            else:
+                prompt = (
+                    self._coarse_prompt_builder(chunk.tagged_text)
+                    if self._coarse_prompt_builder is not None
+                    else _build_coarse_topic_ranges_prompt(chunk.tagged_text)
+                )
+            responses.append(self._call_llm(prompt))
+        return "\n".join(responses)
+
+    def _parse_coarse(self, response: str, sentence_count: int) -> list[SentenceGroup]:
+        parser = TopicRangeParser(input_mode=self._output_mode)
+        try:
+            return parser.parse(response, sentence_count)
+        except ParseError as e:
+            raise LLMError(f"Failed to parse coarse LLM response: {e}") from e
+
+    def _stage2_refine(self, subset_text: str, parent_label: str) -> str:
+        if self._output_mode == "json":
+            prompt = (
+                self._refine_prompt_builder(subset_text, parent_label)
+                if self._refine_prompt_builder is not None
+                else _build_refine_subtopics_json_prompt(subset_text, parent_label)
+            )
+        else:
+            prompt = (
+                self._refine_prompt_builder(subset_text, parent_label)
+                if self._refine_prompt_builder is not None
+                else _build_refine_subtopics_prompt(subset_text, parent_label)
+            )
+        return self._call_llm(prompt)
+
+    def _collect_text(
+        self, tagged_text: str, coarse_groups: list[SentenceGroup]
+    ) -> str:
+        refined: list[str] = []
+        for group in coarse_groups:
+            subset = _extract_lines_by_range(tagged_text, list(group.ranges))
+            if not subset.strip():
+                continue
+            parent_label = ">".join(group.label)
+            fine = self._stage2_refine(subset, parent_label)
+            if fine:
+                refined.append(self._ensure_parent_prefix_text(fine, parent_label))
+        return "\n".join(refined)
+
+    def _collect_json(
+        self, tagged_text: str, coarse_groups: list[SentenceGroup]
+    ) -> str:
+        all_entries: list[dict[str, object]] = []
+        for group in coarse_groups:
+            subset = _extract_lines_by_range(tagged_text, list(group.ranges))
+            if not subset.strip():
+                continue
+            parent_label = list(group.label)
+            fine = self._stage2_refine(subset, ">".join(parent_label))
+            if not fine:
+                continue
+            try:
+                parsed = json.loads(fine)
+                topics = parsed.get("topics", []) if isinstance(parsed, dict) else []
+            except json.JSONDecodeError:
+                continue
+            for topic in topics:
+                if not isinstance(topic, dict):
+                    continue
+                label = topic.get("label")
+                if (
+                    isinstance(label, list)
+                    and label
+                    and label[: len(parent_label)] != parent_label
+                ):
+                    topic = dict(topic, label=parent_label + label)
+                all_entries.append(topic)
+        return json.dumps({"topics": all_entries})
+
+    def _ensure_parent_prefix_text(self, response: str, parent_topic: str) -> str:
+        """Ensure all topic lines in the text response start with parent_topic>."""
+        prefix = f"{parent_topic}>"
+        lines: list[str] = []
+        for line in response.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith(prefix):
+                lines.append(stripped)
+            else:
+                colon_idx = stripped.find(":")
+                if colon_idx > 0:
+                    topic_part = stripped[:colon_idx].strip()
+                    ranges_part = stripped[colon_idx:]
+                    lines.append(f"{prefix}{topic_part}{ranges_part}")
+                else:
+                    lines.append(f"{prefix}{stripped}")
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------
+    # Shared LLM call helper
+    # ------------------------------------------------------------------
+
+    def _call_llm(self, prompt: str) -> str:
+        def _call(p: str, t: float) -> str:
+            try:
+                response = self._client.call(p, temperature=t)
+            except LLMError:
+                raise
+            except Exception as e:
+                raise LLMError(f"LLM call failed: {e}") from e
+            if not response or not response.strip():
+                raise LLMError("Empty LLM response")
+            cleaned = response.strip()
+            if len(cleaned) > self._max_response_chars:
+                raise LLMError(
+                    "LLM response too large: "
+                    f"{len(cleaned)} characters exceeds limit {self._max_response_chars}"
+                )
+            if looks_repetitive(cleaned):
+                raise LLMError("LLM response appears repetitive or stuck in a loop")
+            return cleaned
+
+        return execute_with_retry(_call, prompt, self._temperature, self._retry_policy)

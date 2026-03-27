@@ -39,6 +39,7 @@ from txt_splitt.sentences import (
     SentencePipeline,
     ShortSentenceEnhancer,
     SparseRegexSentenceSplitter,
+    HierarchicalTopicRangeLLM,
     TopicListLLM,
     TopicRangeAssignmentLLM,
     TopicRangeLLM,
@@ -638,7 +639,7 @@ def create_pipeline(
         return build_pipeline(
             splitter=splitter,
             marker=OptimizingMarker(BracketMarker()),
-            llm=TopicRangeLLM(
+            llm=HierarchicalTopicRangeLLM(
                 client=topic_range_llm,
                 temperature=args.temperature,
                 chunker=OverlapChunker(max_chars=args.max_chunk_chars),

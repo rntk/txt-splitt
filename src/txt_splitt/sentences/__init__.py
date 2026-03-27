@@ -15,6 +15,7 @@ from txt_splitt.sentences.joiners import (
     join_sentences_by_groups,
 )
 from txt_splitt.sentences.llm import (
+    HierarchicalTopicRangeLLM,
     TopicListLLM,
     TopicRangeAssignmentLLM,
     TopicRangeLLM,
@@ -60,6 +61,7 @@ __all__ = [
     "Enhancer",
     "GapHandler",
     "GroupJoiner",
+    "HierarchicalTopicRangeLLM",
     "LLMRepairingGapHandler",
     "LLMStrategy",
     "MarkedText",
