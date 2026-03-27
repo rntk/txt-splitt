@@ -4,12 +4,11 @@
 
 from __future__ import annotations
 
-import json
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from txt_splitt.protocols import LLMCallable
 from txt_splitt.retry import RetryPolicy
-from txt_splitt.sentences.llm import TopicRangeLLM
+from txt_splitt.sentences.llm import HierarchicalTopicRangeLLM
 
 if TYPE_CHECKING:
     from txt_splitt.sentences.protocols import MarkedTextChunker
@@ -22,25 +21,20 @@ def build_insight_llm(
     *,
     temperature: float = 0.0,
     chunker: MarkedTextChunker | None = None,
-    output_mode: Literal["text", "json"] = "text",
     retry_policy: RetryPolicy | None = None,
-) -> TopicRangeLLM:
-    """Create a TopicRangeLLM configured for insight extraction.
+) -> HierarchicalTopicRangeLLM:
+    """Create a HierarchicalTopicRangeLLM configured for insight extraction.
 
     Uses the insight-specific prompt instead of the default topic-range prompt.
-    The returned object has the same interface as TopicRangeLLM and can be used
+    The returned object has the same interface as HierarchicalTopicRangeLLM and can be used
     identically (call .query(marked_text) to get a raw LLM response string).
     """
-    prompt_builder = (
-        _build_insights_json_prompt if output_mode == "json" else _build_insights_prompt
-    )
-    return TopicRangeLLM(
+    return HierarchicalTopicRangeLLM(
         client=client,
         temperature=temperature,
         chunker=chunker,
-        output_mode=output_mode,
         retry_policy=retry_policy,
-        prompt_builder=prompt_builder,
+        coarse_prompt_builder=_build_insights_prompt,
     )
 
 
@@ -129,55 +123,4 @@ Patient Exhibits Rare Allergic Reaction to Amoxicillin: 102
 <content>
 {tagged_text}
 </content>
-"""
-
-
-def _insights_json_schema() -> dict[str, object]:
-    return {
-        "type": "object",
-        "additionalProperties": False,
-        "required": ["insights"],
-        "properties": {
-            "insights": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "additionalProperties": False,
-                    "required": ["name", "ranges"],
-                    "properties": {
-                        "name": {"type": "string"},
-                        "ranges": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "additionalProperties": False,
-                                "required": ["start", "end"],
-                                "properties": {
-                                    "start": {"type": "integer", "minimum": 0},
-                                    "end": {"type": "integer", "minimum": 0},
-                                },
-                            },
-                        },
-                    },
-                },
-            }
-        },
-    }
-
-
-def _build_insights_json_prompt(tagged_text: str) -> str:
-    schema = json.dumps(_insights_json_schema(), indent=2)
-    return f"""{_build_insights_prompt(tagged_text)}
-
-IMPORTANT OUTPUT OVERRIDE:
-- Ignore the plain-text output format above.
-- Return ONLY valid JSON that matches this schema.
-- Do not wrap in markdown fences.
-- Do not include any explanation outside the JSON.
-
-Schema:
-{schema}
-
-Example:
-{{"insights": [{{"name": "Context Compaction Threshold at 50K Tokens", "ranges": [{{"start": 12, "end": 14}}, {{"start": 45, "end": 46}}]}}]}}
 """

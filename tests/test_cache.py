@@ -17,7 +17,7 @@ from txt_splitt.cache import (
     SQLiteLLMCacheStore,
 )
 from txt_splitt.sentences.gap_handlers import LLMRepairingGapHandler
-from txt_splitt.sentences.llm import TopicRangeLLM
+from txt_splitt.sentences.llm import HierarchicalTopicRangeLLM
 from txt_splitt.sentences.types import (
     MarkedText,
     Sentence,
@@ -240,7 +240,7 @@ class TestCacheIntegration:
             namespace="topic-range",
             prompt_version="v1",
         )
-        llm = TopicRangeLLM(client)
+        llm = HierarchicalTopicRangeLLM(client)
         marked_text = MarkedText(tagged_text="{0} A", sentence_count=1)
 
         assert llm.query(marked_text) == "Topic: 0-1"

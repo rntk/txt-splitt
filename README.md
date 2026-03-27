@@ -48,7 +48,7 @@ the wrapper. The wrapper owns key generation; your store only needs `get()` and
 
 ```python
 from txt_splitt import CachingLLMCallable
-from txt_splitt.sentences import TopicRangeLLM
+from txt_splitt.sentences import HierarchicalTopicRangeLLM
 
 cached_client = CachingLLMCallable(
     inner=my_llm_client,
@@ -58,7 +58,7 @@ cached_client = CachingLLMCallable(
     prompt_version="v1",
 )
 
-llm = TopicRangeLLM(cached_client)
+llm = HierarchicalTopicRangeLLM(cached_client)
 ```
 
 ## Development with Docker

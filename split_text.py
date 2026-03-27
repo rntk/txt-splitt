@@ -632,7 +632,6 @@ def create_pipeline(
                 client=topic_range_llm,
                 temperature=args.temperature,
                 chunker=OverlapChunker(max_chars=args.max_chunk_chars),
-                output_mode=output_mode,
                 retry_policy=retry_policy,
             ),
             parser=TopicRangeParser(input_mode=parser_mode),
