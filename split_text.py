@@ -3,13 +3,14 @@
 
 import argparse
 import asyncio
+import functools
 import json
 import sys
 from datetime import datetime
 from html import escape
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 # Add src to path so we can import txt_splitt when running from root
 sys.path.append(str(Path(__file__).parent / "src"))
@@ -543,44 +544,16 @@ def main() -> None:
 def create_pipeline(
     args: Any,
     input_path: Path,
-    sync_llm: LLMCallable | None = None,
     tracer: Tracer | None = None,
     cache_store: SQLiteLLMCacheStore | None = None,
 ) -> SentencePipeline:
-    """Create pipeline with appropriate configuration."""
-    topic_range_llm = None
+    """Create a staged pipeline configuration.
+
+    LLM clients are injected separately when executing the session.
+    """
     gap_repair_llm = None
     short_sentence_llm = None
     boundary_llm = None
-    if sync_llm is not None:
-        topic_range_llm = wrap_sync_llm(
-            sync_llm,
-            namespace="topic-range",
-            args=args,
-            tracer=tracer,
-            cache_store=cache_store,
-        )
-        gap_repair_llm = wrap_sync_llm(
-            sync_llm,
-            namespace="gap-repair",
-            args=args,
-            tracer=tracer,
-            cache_store=cache_store,
-        )
-        short_sentence_llm = wrap_sync_llm(
-            sync_llm,
-            namespace="short-sentence-enhancer",
-            args=args,
-            tracer=tracer,
-            cache_store=cache_store,
-        )
-        boundary_llm = wrap_sync_llm(
-            sync_llm,
-            namespace="boundary-evaluator",
-            args=args,
-            tracer=tracer,
-            cache_store=cache_store,
-        )
     splitter = SparseRegexSentenceSplitter(
         anchor_every_words=args.anchor_words,
         long_sentence_word_threshold=args.long_sentence_threshold,
@@ -616,7 +589,6 @@ def create_pipeline(
             splitter=splitter,
             marker=OptimizingMarker(BracketMarker()),
             llm=HierarchicalTopicRangeLLM(
-                topic_range_llm,
                 temperature=args.temperature,
                 chunker=OverlapChunker(max_chars=args.max_chunk_chars),
             ),
@@ -705,6 +677,18 @@ def _namespace_for_request(request: LLMRequest) -> str:
     raise ValueError(msg)
 
 
+def _call_request_sync(
+    request: LLMRequest,
+    clients: dict[str, LLMCallable],
+) -> LLMResponse:
+    return LLMResponse(
+        content=clients[_namespace_for_request(request)].call(
+            request.prompt,
+            request.temperature,
+        )
+    )
+
+
 def execute_session_sync(
     pipeline: SentencePipeline,
     text: str,
@@ -715,12 +699,7 @@ def execute_session_sync(
         while not session.is_complete():
             requests = session.pending_requests()
             responses = pool.map(
-                lambda request: LLMResponse(
-                    content=clients[_namespace_for_request(request)].call(
-                        request.prompt,
-                        request.temperature,
-                    )
-                ),
+                functools.partial(_call_request_sync, clients=clients),
                 requests,
             )
             session.submit_responses(responses)

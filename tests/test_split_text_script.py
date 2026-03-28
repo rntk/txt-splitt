@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
 
 import pytest
 
@@ -111,15 +110,11 @@ def test_create_pipeline_uses_single_stage_only(tmp_path: Path) -> None:
     pipeline = create_pipeline(
         args,
         Path("input.txt"),
-        StubLLM(),
         tracer=Tracer(),
         cache_store=build_cache_store(args),
     )
 
     assert isinstance(pipeline._llm, HierarchicalTopicRangeLLM)
-    assert isinstance(pipeline._llm._client, TracingLLMCallable)
-    topic_range_client = cast(CachingLLMCallable, pipeline._llm._client._inner)
-    assert topic_range_client._namespace == "topic-range"
 
 
 def test_create_pipeline_two_stage_raises_not_implemented(tmp_path: Path) -> None:
@@ -132,7 +127,6 @@ def test_create_pipeline_two_stage_raises_not_implemented(tmp_path: Path) -> Non
         create_pipeline(
             args,
             Path("input.txt"),
-            StubLLM(),
             tracer=Tracer(),
             cache_store=build_cache_store(args),
         )

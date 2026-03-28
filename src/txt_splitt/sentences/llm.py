@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from txt_splitt.errors import LLMError, ParseError
 from txt_splitt.llms.utils import looks_repetitive
 from txt_splitt.pipeline import CompletedStage, PendingStage, StageResult
-from txt_splitt.protocols import LLMCallable, LLMRequest, LLMResponse
+from txt_splitt.protocols import LLMRequest, LLMResponse
 from txt_splitt.sentences.parsers import TopicRangeParser
 from txt_splitt.sentences.types import MarkedText, SentenceGroup, SentenceRange
 
@@ -186,7 +186,7 @@ def _merge_topic_parts(parent_parts: list[str], line_parts: list[str]) -> list[s
 
 
 class HierarchicalTopicRangeLLM:
-    """Two-stage hierarchical topic splitting implementing LLMStrategy.
+    """Two-stage hierarchical topic splitting implementing SchedulableLLMStrategy.
 
     Stage 1 asks the LLM to produce broad, high-level topics and large ranges
     covering the whole document.  Stage 2 takes each coarse range, extracts
@@ -198,7 +198,6 @@ class HierarchicalTopicRangeLLM:
 
     def __init__(
         self,
-        client: LLMCallable | None = None,
         *,
         temperature: float = 0.0,
         chunker: "MarkedTextChunker | None" = None,
@@ -209,43 +208,13 @@ class HierarchicalTopicRangeLLM:
         if max_response_chars <= 0:
             msg = "max_response_chars must be > 0"
             raise ValueError(msg)
-        self._client = client
         self._temperature = temperature
         self._chunker = chunker
         self._max_response_chars = max_response_chars
         self._coarse_prompt_builder = coarse_prompt_builder
         self._refine_prompt_builder = refine_prompt_builder
 
-    @property
-    def response_format(self) -> str:
-        return "text"
-
-    def query(self, marked_text: MarkedText) -> str:
-        if self._client is None:
-            msg = "query() requires a configured client; use plan_query() instead"
-            raise RuntimeError(msg)
-        stage = self.plan_query(marked_text)
-        while isinstance(stage, PendingStage):
-            responses: list[LLMResponse] = []
-            for request in stage.requests:
-                try:
-                    content = self._client.call(
-                        request.prompt, temperature=request.temperature
-                    )
-                except LLMError:
-                    raise
-                except Exception as e:
-                    raise LLMError(f"LLM call failed: {e}") from e
-                responses.append(
-                    LLMResponse(
-                        content=_validate_response(
-                            str(content),
-                            max_response_chars=self._max_response_chars,
-                        )
-                    )
-                )
-            stage = stage.resume(responses)
-        return stage.value
+    response_format: str = "text"
 
     def plan_query(self, marked_text: MarkedText) -> StageResult[str]:
         """Emit coarse requests, then refine requests, then final text."""

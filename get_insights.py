@@ -19,15 +19,40 @@ from txt_splitt import (
     Tracer,
     TracingLLMCallable,
 )
+from txt_splitt.errors import LLMError
 from txt_splitt.html_cleaners import HTMLParserTagStripCleaner
 from txt_splitt.insights import InsightParser, InsightResult, build_insight_llm
 from txt_splitt.llms.llamacpp import LLamaCPP
+from txt_splitt.pipeline import PendingStage
+from txt_splitt.protocols import LLMResponse
 from txt_splitt.sentences import (
     BracketMarker,
     OptimizingMarker,
     OverlapChunker,
     SparseRegexSentenceSplitter,
 )
+
+
+def _drive_llm(
+    llm: Any,
+    marked_text: Any,
+    client: LLMCallable,
+) -> str:
+    """Drive plan_query() by executing requests against a client."""
+    stage: Any = llm.plan_query(marked_text)
+    while isinstance(stage, PendingStage):
+        responses = []
+        for request in stage.requests:
+            try:
+                content = client.call(request.prompt, request.temperature)
+            except LLMError:
+                raise
+            except Exception as e:
+                raise LLMError(f"LLM call failed: {e}") from e
+            responses.append(LLMResponse(content=str(content)))
+        stage = stage.resume(responses)
+    result: str = stage.value
+    return result
 
 
 class LLamaCPPAdapter:
@@ -396,7 +421,6 @@ def run(args: Any) -> None:
     )
 
     insight_llm = build_insight_llm(
-        wrapped_llm,
         temperature=args.temperature,
         chunker=OverlapChunker(max_chars=args.max_chunk_chars),
     )
@@ -405,7 +429,7 @@ def run(args: Any) -> None:
     print(f"Processing '{args.input_file}'...")
     trace_output: str | None = None
     try:
-        raw_response = insight_llm.query(marked_text)
+        raw_response = _drive_llm(insight_llm, marked_text, wrapped_llm)
         insights_list = parser.parse(raw_response, marked_text.sentence_count)
     except Exception as e:
         print(f"Error processing text: {e}", file=sys.stderr)

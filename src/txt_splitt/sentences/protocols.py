@@ -18,12 +18,6 @@ class MarkerStrategy(Protocol):
     def mark(self, text: str, sentences: list[Sentence]) -> MarkedText: ...
 
 
-class LLMStrategy(Protocol):
-    """Stage 3: Query an LLM with marked text."""
-
-    def query(self, marked_text: MarkedText) -> str: ...
-
-
 class SchedulableLLMStrategy(Protocol):
     """Stage 3: Emit ordered LLM request batches for marked text."""
 

@@ -16,6 +16,9 @@ from txt_splitt.cache import (
     MemoryLLMCacheStore,
     SQLiteLLMCacheStore,
 )
+from txt_splitt.errors import LLMError
+from txt_splitt.pipeline import PendingStage
+from txt_splitt.protocols import LLMCallable, LLMResponse
 from txt_splitt.sentences.gap_handlers import LLMRepairingGapHandler
 from txt_splitt.sentences.llm import HierarchicalTopicRangeLLM
 from txt_splitt.sentences.types import (
@@ -230,6 +233,26 @@ class TestSQLiteLLMCacheStore:
         second_inner.call.assert_not_called()
 
 
+def _drive_llm(
+    llm: HierarchicalTopicRangeLLM,
+    mt: MarkedText,
+    client: LLMCallable,
+) -> str:
+    stage = llm.plan_query(mt)
+    while isinstance(stage, PendingStage):
+        responses = []
+        for request in stage.requests:
+            try:
+                content = client.call(request.prompt, request.temperature)
+            except LLMError:
+                raise
+            except Exception as e:
+                raise LLMError(f"LLM call failed: {e}") from e
+            responses.append(LLMResponse(content=str(content)))
+        stage = stage.resume(responses)
+    return stage.value
+
+
 class TestCacheIntegration:
     def test_topic_range_llm_uses_cached_client(self) -> None:
         inner = MagicMock()
@@ -240,11 +263,11 @@ class TestCacheIntegration:
             namespace="topic-range",
             prompt_version="v1",
         )
-        llm = HierarchicalTopicRangeLLM(client)
+        llm = HierarchicalTopicRangeLLM()
         marked_text = MarkedText(tagged_text="{0} A", sentence_count=1)
 
-        assert llm.query(marked_text) == "Topic: 0-1"
-        assert llm.query(marked_text) == "Topic: 0-1"
+        assert _drive_llm(llm, marked_text, client) == "Topic: 0-1"
+        assert _drive_llm(llm, marked_text, client) == "Topic: 0-1"
         assert inner.call.call_count == 2
 
     def test_gap_handler_uses_cached_client(self) -> None:

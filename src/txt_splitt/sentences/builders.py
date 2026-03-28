@@ -24,7 +24,6 @@ if TYPE_CHECKING:
         Enhancer,
         GapHandler,
         GroupJoiner,
-        LLMStrategy,
         MarkerStrategy,
         RangeAssigner,
         ResponseParser,
@@ -196,30 +195,14 @@ class _TwoStageQuery:
         response_format = getattr(self._range_assigner, "response_format", "text")
         return response_format if isinstance(response_format, str) else "text"
 
-    def query(self, marked_text: MarkedText) -> str:
+    def plan_query(self, marked_text: MarkedText) -> StageResult[str]:
         with self._tracer.span("topic_extract") as span:
             topics = self._topic_extractor.extract(marked_text)
             span.attributes["topic_count"] = len(topics)
         with self._tracer.span("range_assign") as span:
             response = self._range_assigner.assign(marked_text, topics)
             span.attributes["response_length"] = len(response)
-            return response
-
-    async def query_async(self, marked_text: MarkedText) -> str:
-        assign_async = getattr(self._range_assigner, "assign_async", None)
-        if assign_async is None:
-            msg = "range_assigner must support assign_async for async mode"
-            raise RuntimeError(msg)
-        with self._tracer.span("topic_extract") as span:
-            topics = self._topic_extractor.extract(marked_text)
-            span.attributes["topic_count"] = len(topics)
-        with self._tracer.span("range_assign_async") as span:
-            response = await assign_async(marked_text, topics)
-            if not isinstance(response, str):
-                msg = "range_assigner.assign_async() must return a string response"
-                raise RuntimeError(msg)
-            span.attributes["response_length"] = len(response)
-            return response
+        return CompletedStage(response)
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,7 +216,7 @@ class SentencePipeline:
         list[SentenceGroup],
         SplitResult,
     ]
-    _llm: LLMStrategy | SchedulableLLMStrategy | None
+    _llm: SchedulableLLMStrategy | None
     _topic_extractor: TopicExtractor | None
     _range_assigner: RangeAssigner | None
     _gap_handler: GapHandler
@@ -246,9 +229,6 @@ class SentencePipeline:
     def run(self, text: str) -> SplitResult:
         return self._pipeline.run(text)
 
-    async def run_async(self, text: str) -> SplitResult:
-        return await self._pipeline.run_async(text)
-
 
 def build_pipeline(
     *,
@@ -256,7 +236,7 @@ def build_pipeline(
     marker: MarkerStrategy,
     parser: ResponseParser,
     gap_handler: GapHandler,
-    llm: LLMStrategy | SchedulableLLMStrategy | None = None,
+    llm: SchedulableLLMStrategy | None = None,
     topic_extractor: TopicExtractor | None = None,
     range_assigner: RangeAssigner | None = None,
     enhancers: Sequence[Enhancer] | None = None,

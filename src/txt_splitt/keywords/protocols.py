@@ -3,6 +3,7 @@
 from typing import Protocol
 
 from txt_splitt.keywords.types import Keyword, MarkedWords, Word
+from txt_splitt.pipeline import StageResult
 
 
 class WordSplitter(Protocol):
@@ -18,9 +19,12 @@ class WordMarkerStrategy(Protocol):
 
 
 class KeywordLLMStrategy(Protocol):
-    """Stage 3: Query an LLM with marked words."""
+    """Stage 3: Emit LLM request batches for marked words."""
 
-    def query(self, marked: MarkedWords) -> str: ...
+    @property
+    def response_format(self) -> str: ...
+
+    def plan_query(self, marked: MarkedWords) -> StageResult[str]: ...
 
 
 class KeywordParser(Protocol):

@@ -6,7 +6,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from txt_splitt.protocols import LLMCallable
 from txt_splitt.sentences.llm import HierarchicalTopicRangeLLM
 
 if TYPE_CHECKING:
@@ -16,7 +15,6 @@ __all__ = ["build_insight_llm"]
 
 
 def build_insight_llm(
-    client: LLMCallable,
     *,
     temperature: float = 0.0,
     chunker: MarkedTextChunker | None = None,
@@ -24,11 +22,10 @@ def build_insight_llm(
     """Create a HierarchicalTopicRangeLLM configured for insight extraction.
 
     Uses the insight-specific prompt instead of the default topic-range prompt.
-    The returned object has the same interface as HierarchicalTopicRangeLLM and can be used
-    identically (call .query(marked_text) to get a raw LLM response string).
+    The returned object produces LLM requests that must be executed by a client.
+    Use plan_query() to get requests, then drive execution with a client.
     """
     return HierarchicalTopicRangeLLM(
-        client=client,
         temperature=temperature,
         chunker=chunker,
         coarse_prompt_builder=_build_insights_prompt,

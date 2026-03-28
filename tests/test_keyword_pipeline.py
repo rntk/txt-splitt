@@ -20,6 +20,8 @@ from txt_splitt.keywords.markers import WordBracketMarker
 from txt_splitt.keywords.parsers import KeywordIndexParser
 from txt_splitt.keywords.splitters import RegexWordSplitter
 from txt_splitt.keywords.types import Keyword, MarkedWords, Word
+from txt_splitt.pipeline import CompletedStage, PendingStage, StageResult
+from txt_splitt.protocols import LLMRequest, LLMResponse
 
 # ---------------------------------------------------------------------------
 # Word splitting
@@ -191,11 +193,32 @@ class MockLLMCallable:
 
 
 class MockKeywordLLM:
+    response_format: str = "text"
+
     def __init__(self, response: str) -> None:
         self._response = response
 
-    def query(self, marked: MarkedWords) -> str:
-        return self._response
+    def plan_query(self, marked: MarkedWords) -> StageResult[str]:
+        return CompletedStage(self._response)
+
+
+class DeferredKeywordLLM:
+    response_format: str = "text"
+
+    def __init__(self, requests: tuple[LLMRequest, ...], response: str) -> None:
+        self._requests = requests
+        self._response = response
+
+    def plan_query(self, marked: MarkedWords) -> StageResult[str]:
+        del marked
+        return PendingStage(
+            requests=self._requests,
+            resume=lambda responses: CompletedStage(_merge_contents(responses)),
+        )
+
+
+def _merge_contents(responses: list[LLMResponse]) -> str:
+    return ", ".join(response.content for response in responses)
 
 
 class TestKeywordPipeline:
@@ -493,6 +516,36 @@ class TestRepairingGapHandler:
         result = pipeline.run(text)
         assert len(result.keywords) > 1
 
+    def test_large_gap_accepts_deferred_llm(self) -> None:
+        text, words = self._build_text_and_words(30)
+        kws = [Keyword(text=words[0].text, start=words[0].start, end=words[0].end)]
+        llm = DeferredKeywordLLM(
+            requests=(
+                LLMRequest(prompt="gap chunk 1", temperature=0.0),
+                LLMRequest(prompt="gap chunk 2", temperature=0.0),
+            ),
+            response="0",
+        )
+        seen_prompts: list[str] = []
+
+        validator = RepairingGapHandler(
+            splitter=RegexWordSplitter(),
+            marker=WordBracketMarker(),
+            llm=llm,
+            parser=KeywordIndexParser(),
+            min_gap_words=20,
+            request_executor=lambda prompt, temperature: _record_and_reply(
+                seen_prompts,
+                prompt,
+                temperature,
+            ),
+        )
+
+        result = validator.validate(kws, words, text)
+
+        assert len(result) > 1
+        assert seen_prompts == ["gap chunk 1", "gap chunk 2"]
+
     def test_invalid_min_gap_words_raises(self) -> None:
         with pytest.raises(ValueError):
             RepairingGapHandler(
@@ -502,3 +555,13 @@ class TestRepairingGapHandler:
                 parser=KeywordIndexParser(),
                 min_gap_words=0,
             )
+
+
+def _record_and_reply(
+    seen_prompts: list[str],
+    prompt: str,
+    temperature: float,
+) -> str:
+    assert temperature == 0.0
+    seen_prompts.append(prompt)
+    return "0"

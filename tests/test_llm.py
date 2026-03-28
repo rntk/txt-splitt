@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from txt_splitt.errors import LLMError
-from txt_splitt.retry import RetryConfig
+from txt_splitt.protocols import LLMResponse
 from txt_splitt.sentences.llm import (
     HierarchicalTopicRangeLLM,
     _build_coarse_topic_ranges_prompt,
@@ -17,43 +17,27 @@ from txt_splitt.sentences.llm import (
 from txt_splitt.sentences.types import MarkedText, SentenceRange
 
 
-class TestRetryConfig:
-    def test_max_attempts_zero_raises(self) -> None:
-        with pytest.raises(ValueError, match="max_attempts must be >= 1"):
-            RetryConfig(max_attempts=0)
+def _drive_llm(
+    llm: HierarchicalTopicRangeLLM,
+    mt: MarkedText,
+    client: MagicMock,
+) -> str:
+    """Drive plan_query() by executing requests against a mock client."""
+    from txt_splitt.pipeline import PendingStage
 
-    def test_next_returns_none_when_exhausted(self) -> None:
-        policy = RetryConfig(max_attempts=2)
-        assert policy.next(2, "p", 0.0, LLMError("x")) is None
-
-    def test_next_returns_same_params_by_default(self) -> None:
-        policy = RetryConfig(max_attempts=3)
-        result = policy.next(0, "my prompt", 0.5, LLMError("x"))
-        assert result == ("my prompt", 0.5)
-
-    def test_temperature_schedule_applied(self) -> None:
-        policy = RetryConfig(max_attempts=3, temperature_schedule=[0.2, 0.7])
-        assert policy.next(0, "p", 0.0, LLMError("x")) == ("p", 0.2)
-        assert policy.next(1, "p", 0.0, LLMError("x")) == ("p", 0.7)
-        # Beyond schedule length: falls back to passed temperature
-        assert policy.next(2, "p", 0.0, LLMError("x")) == ("p", 0.0)
-
-    def test_prompt_modifier_applied(self) -> None:
-        policy = RetryConfig(
-            max_attempts=3,
-            prompt_modifier=lambda p, attempt: f"{p} retry={attempt}",
-        )
-        result = policy.next(1, "base", 0.0, LLMError("x"))
-        assert result == ("base retry=1", 0.0)
-
-    def test_both_modifiers_combined(self) -> None:
-        policy = RetryConfig(
-            max_attempts=2,
-            temperature_schedule=[0.9],
-            prompt_modifier=lambda p, _: p + " HINT",
-        )
-        result = policy.next(0, "original", 0.0, LLMError("x"))
-        assert result == ("original HINT", 0.9)
+    stage = llm.plan_query(mt)
+    while isinstance(stage, PendingStage):
+        responses = []
+        for request in stage.requests:
+            try:
+                content = client.call(request.prompt, request.temperature)
+            except LLMError:
+                raise
+            except Exception as e:
+                raise LLMError(f"LLM call failed: {e}") from e
+            responses.append(LLMResponse(content=str(content)))
+        stage = stage.resume(responses)
+    return stage.value
 
 
 class TestExtractLinesByRange:
@@ -105,10 +89,10 @@ class TestHierarchicalTopicRangeLLM:
             "Technology>AI: 0-1",
             "Summary: 0-1",
         ]
-        llm = HierarchicalTopicRangeLLM(client)
+        llm = HierarchicalTopicRangeLLM()
 
         mt = MarkedText(tagged_text="{0} A\n{1} B", sentence_count=2)
-        result = llm.query(mt)
+        result = _drive_llm(llm, mt, client)
 
         assert result == "Technology>AI>Summary: 0-1"
         assert client.call.call_count == 2
@@ -120,10 +104,10 @@ class TestHierarchicalTopicRangeLLM:
             "Technology>AI: 0",
             "Summary: 0",
         ]
-        llm = HierarchicalTopicRangeLLM(client)
+        llm = HierarchicalTopicRangeLLM()
 
         mt = MarkedText(tagged_text="{0} Text", sentence_count=1)
-        llm.query(mt)
+        _drive_llm(llm, mt, client)
 
         coarse_prompt = client.call.call_args_list[0][0][0]
         refine_prompt = client.call.call_args_list[1][0][0]
@@ -140,8 +124,8 @@ class TestHierarchicalTopicRangeLLM:
         client.call.side_effect = [coarse_response, ai_fine, finance_fine]
 
         mt = self._make_large_marked_text(100)
-        llm = HierarchicalTopicRangeLLM(client)
-        result = llm.query(mt)
+        llm = HierarchicalTopicRangeLLM()
+        result = _drive_llm(llm, mt, client)
 
         assert "Technology>AI>LLMs: 0-24" in result
         assert "Technology>AI>Agents: 25-49" in result
@@ -163,8 +147,8 @@ class TestHierarchicalTopicRangeLLM:
             "{0} AI sentence.\n{1} More AI.\n{2} Finance sentence.\n{3} More finance."
         )
         mt = MarkedText(tagged_text=tagged, sentence_count=4)
-        llm = HierarchicalTopicRangeLLM(client)
-        llm.query(mt)
+        llm = HierarchicalTopicRangeLLM()
+        _drive_llm(llm, mt, client)
 
         # Second call (first stage-2) must contain markers 0-1 and nearby context
         second_prompt = client.call.call_args_list[1][0][0]
@@ -189,8 +173,8 @@ class TestHierarchicalTopicRangeLLM:
         ]
 
         mt = self._make_large_marked_text(50)
-        llm = HierarchicalTopicRangeLLM(client)
-        llm.query(mt)
+        llm = HierarchicalTopicRangeLLM()
+        _drive_llm(llm, mt, client)
 
         refine_prompt = client.call.call_args_list[1][0][0]
         assert "Technology>AI" in refine_prompt
@@ -205,29 +189,25 @@ class TestHierarchicalTopicRangeLLM:
         ]
 
         mt = self._make_large_marked_text(50)
-        llm = HierarchicalTopicRangeLLM(client)
-        result = llm.query(mt)
+        llm = HierarchicalTopicRangeLLM()
+        result = _drive_llm(llm, mt, client)
 
         assert "Technology>AI>Developer Tools>Coding Models: 0-24" in result
         assert "Technology>AI>Automation>Agents: 25-49" in result
 
     def test_empty_subset_skipped(self) -> None:
         """Coarse groups whose marker IDs are absent from tagged_text are skipped."""
-        # tagged_text only has marker {0}; coarse assigns {0} to AI and
-        # {10}-{10} to Finance. Marker {10} is absent from tagged_text,
-        # so Finance subset (even with context) is empty → skipped.
         coarse_response = "Technology>AI: 0-0\nBusiness>Finance: 10-10"
         client = MagicMock()
         client.call.side_effect = [
             coarse_response,
             "LLMs: 0-0",
-            # Finance stage 2 should NOT be called (empty subset)
         ]
 
         tagged = "{0} AI sentence only."
         mt = MarkedText(tagged_text=tagged, sentence_count=11)
-        llm = HierarchicalTopicRangeLLM(client)
-        result = llm.query(mt)
+        llm = HierarchicalTopicRangeLLM()
+        result = _drive_llm(llm, mt, client)
 
         assert "Technology>AI>LLMs: 0-0" in result
         assert client.call.call_count == 2  # coarse + 1 stage-2 only
@@ -238,9 +218,9 @@ class TestHierarchicalTopicRangeLLM:
         client.call.return_value = "this is not a valid topic range line"
 
         mt = self._make_large_marked_text(100)
-        llm = HierarchicalTopicRangeLLM(client)
+        llm = HierarchicalTopicRangeLLM()
         with pytest.raises(LLMError, match="Failed to parse coarse LLM response"):
-            llm.query(mt)
+            _drive_llm(llm, mt, client)
 
     def test_chunker_applied_to_stage1(self) -> None:
         """Chunker is used for the coarse stage-1 call."""
@@ -250,42 +230,38 @@ class TestHierarchicalTopicRangeLLM:
         chunker.chunk.return_value = [chunk_a, chunk_b]
 
         client = MagicMock()
-        # Two coarse chunks → two stage-2 calls (one per coarse group)
         client.call.side_effect = [
-            "Technology>AI: 0-1",  # chunk 1 coarse
-            "Business>Finance: 2-3",  # chunk 2 coarse
+            "Technology>AI: 0-1",
+            "Business>Finance: 2-3",
             "Technology>AI>LLMs: 0-1",
             "Business>Finance>Stocks: 2-3",
         ]
 
         tagged = "{0} A\n{1} B\n{2} C\n{3} D"
         mt = MarkedText(tagged_text=tagged, sentence_count=4)
-        llm = HierarchicalTopicRangeLLM(client, chunker=chunker)
-        llm.query(mt)
+        llm = HierarchicalTopicRangeLLM(chunker=chunker)
+        _drive_llm(llm, mt, client)
 
         chunker.chunk.assert_called_once_with(mt)
-        # Coarse prompts come from the chunks, not the full text
         first_prompt = client.call.call_args_list[0][0][0]
         assert "{0} A" in first_prompt
         assert "{2} C" not in first_prompt
 
     def test_invalid_max_response_chars_raises(self) -> None:
-        client = MagicMock()
         with pytest.raises(ValueError, match="max_response_chars must be > 0"):
-            HierarchicalTopicRangeLLM(client, max_response_chars=0)
+            HierarchicalTopicRangeLLM(max_response_chars=0)
 
     def test_response_format_property(self) -> None:
-        client = MagicMock()
-        assert HierarchicalTopicRangeLLM(client).response_format == "text"
+        assert HierarchicalTopicRangeLLM().response_format == "text"
 
     def test_client_exception_wrapped(self) -> None:
         client = MagicMock()
         client.call.side_effect = Exception("Network error")
-        llm = HierarchicalTopicRangeLLM(client)
+        llm = HierarchicalTopicRangeLLM()
 
         mt = self._make_large_marked_text(100)
         with pytest.raises(LLMError, match="LLM call failed: Network error"):
-            llm.query(mt)
+            _drive_llm(llm, mt, client)
 
     def test_coarse_prompt_uses_broad_heading(self) -> None:
         """Coarse prompt requests broad, merged grouping."""
@@ -368,10 +344,9 @@ class TestHierarchicalTopicRangeLLM:
 
         mt = self._make_large_marked_text(50)
         llm = HierarchicalTopicRangeLLM(
-            client,
             coarse_prompt_builder=custom_coarse,
         )
-        llm.query(mt)
+        _drive_llm(llm, mt, client)
 
         assert len(custom_prompt_calls) == 1
         assert client.call.call_args_list[0][0][0] == "custom coarse prompt"
@@ -392,10 +367,9 @@ class TestHierarchicalTopicRangeLLM:
 
         mt = self._make_large_marked_text(50)
         llm = HierarchicalTopicRangeLLM(
-            client,
             refine_prompt_builder=custom_refine,
         )
-        llm.query(mt)
+        _drive_llm(llm, mt, client)
 
         assert len(refine_calls) == 1
         assert refine_calls[0][1] == "Technology>AI"

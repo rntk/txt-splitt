@@ -9,6 +9,7 @@ from txt_splitt.errors import (
     ParseError,
     SentenceSplitError,
 )
+from txt_splitt.pipeline import CompletedStage, StageResult
 from txt_splitt.sentences.builders import build_pipeline
 from txt_splitt.sentences.types import (
     MarkedText,
@@ -38,11 +39,13 @@ class StubMarker:
 
 
 class StubLLM:
+    response_format: str = "text"
+
     def __init__(self, response: str) -> None:
         self._response = response
 
-    def query(self, marked_text: MarkedText) -> str:
-        return self._response
+    def plan_query(self, marked_text: MarkedText) -> StageResult[str]:
+        return CompletedStage(self._response)
 
 
 class JsonStubLLM(StubLLM):
@@ -84,7 +87,9 @@ class FailingSplitter:
 
 
 class FailingLLM:
-    def query(self, marked_text: MarkedText) -> str:
+    response_format: str = "text"
+
+    def plan_query(self, marked_text: MarkedText) -> StageResult[str]:
         raise LLMError("LLM unavailable")
 
 
@@ -485,9 +490,7 @@ class TestPipeline:
         # Pipeline returns second enhancer's output
         assert result.groups[0].label == ("Second",)
 
-    def test_multiple_enhancers_run_sequentially_async(self) -> None:
-        import asyncio
-
+    def test_multiple_enhancers_run_sequentially_via_start(self) -> None:
         sentences = _make_sentences(3)
         gap_groups = _make_groups()
         first_output = [
@@ -499,26 +502,18 @@ class TestPipeline:
         first = RecordingEnhancer(first_output)
         second = RecordingEnhancer(second_output)
 
-        class AsyncStubRangeAssigner:
-            def assign(self, marked_text: MarkedText, topics: list[str]) -> str:
-                raise RuntimeError("assign() should not be used in async test")
-
-            async def assign_async(
-                self, marked_text: MarkedText, topics: list[str]
-            ) -> str:
-                return "..."
-
         pipeline = build_pipeline(
             splitter=StubSplitter(sentences),
             marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
-            topic_extractor=StubTopicExtractor(["Technology>AI"]),
-            range_assigner=AsyncStubRangeAssigner(),
+            llm=StubLLM("..."),
             parser=StubParser(gap_groups),
             gap_handler=StubGapHandler(gap_groups),
             enhancers=[first, second],
         )
-        result = asyncio.run(pipeline.run_async("text"))
+        session = pipeline.start("text")
 
+        assert session.is_complete()
+        result = session.result()
         assert first.seen_groups == gap_groups
         assert second.seen_groups == first_output
         assert result.groups[0].label == ("Second",)

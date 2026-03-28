@@ -2,6 +2,7 @@
 
 import pytest
 
+from txt_splitt.pipeline import CompletedStage, StageResult
 from txt_splitt.sentences.batch_pipeline import BatchPipeline
 from txt_splitt.sentences.builders import build_pipeline
 from txt_splitt.sentences.types import (
@@ -33,11 +34,13 @@ class StubMarker:
 
 
 class StubLLM:
+    response_format: str = "text"
+
     def __init__(self, response: str) -> None:
         self._response = response
 
-    def query(self, marked_text: MarkedText) -> str:
-        return self._response
+    def plan_query(self, marked_text: MarkedText) -> StageResult[str]:
+        return CompletedStage(self._response)
 
 
 class StubParser:

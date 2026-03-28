@@ -37,12 +37,6 @@ class Marker(Protocol[TItem, TMarkedOut]):
     def mark(self, text: str, items: list[TItem]) -> TMarkedOut: ...
 
 
-class Query(Protocol[TMarkedIn]):
-    """Produce a raw model response from marked input."""
-
-    def query(self, marked: TMarkedIn) -> str: ...
-
-
 class SchedulableQuery(Protocol[TMarkedIn]):
     """Produce ordered LLM request batches for marked input."""
 
@@ -214,7 +208,7 @@ class Pipeline(Generic[TItem, TMarked, TParsed, TValue, TResult]):
         *,
         splitter: Splitter[TItem],
         marker: Marker[TItem, TMarked],
-        query: Query[TMarked] | SchedulableQuery[TMarked],
+        query: SchedulableQuery[TMarked],
         parser: Parser[TParsed],
         result_factory: ResultFactory[TItem, TValue, TResult],
         state_builder: StateBuilder[TItem, TParsed, TValue] | None = None,
@@ -278,49 +272,12 @@ class Pipeline(Generic[TItem, TMarked, TParsed, TValue, TResult]):
             raise RuntimeError(msg)
         return session.result()
 
-    async def run_async(self, text: str) -> TResult:
-        """Run the full pipeline asynchronously for query stages with query_async()."""
-        query_async = getattr(self._query, "query_async", None)
-        if query_async is None:
-            msg = "run_async requires a query stage with query_async() support"
-            raise RuntimeError(msg)
-        with self._tracer.span("pipeline.run_async", input_length=len(text)):
-            prepared_text, mapping = self._prepare_text(text)
-            items, marked, item_count = self._split_and_mark(prepared_text)
-            with self._tracer.span("llm.query") as span:
-                response = await query_async(marked)
-                span.attributes["response_length"] = len(response)
-            state = self._parse_and_build(
-                response=response,
-                items=items,
-                prepared_text=prepared_text,
-                item_count=item_count,
-            )
-            for processor in self._postprocessors:
-                process = getattr(processor, "process", None)
-                if not callable(process):
-                    msg = (
-                        f"processor {type(processor).__name__!r} does not implement "
-                        "process(); run_async() only supports PostProcessor types"
-                    )
-                    raise RuntimeError(msg)
-
-                sync_processor = cast(PostProcessor[TItem, TValue], processor)
-                state = sync_processor.process(
-                    state,
-                    text=prepared_text,
-                    item_count=item_count,
-                )
-            result = self._result_factory.create(state)
-            return self._restore_offsets(result, mapping)
-
     def _start_step(self, text: str) -> SessionStep[TResult]:
         prepared_text, mapping = self._prepare_text(text)
         items, marked, item_count = self._split_and_mark(prepared_text)
         return self._resolve_query_step(
             query_step=self._plan_query(marked),
             items=items,
-            marked=marked,
             prepared_text=prepared_text,
             item_count=item_count,
             mapping=mapping,
@@ -352,21 +309,13 @@ class Pipeline(Generic[TItem, TMarked, TParsed, TValue, TResult]):
         return items, marked, item_count
 
     def _plan_query(self, marked: TMarked) -> StageResult[str]:
-        plan_query = getattr(self._query, "plan_query", None)
-        if callable(plan_query):
-            return cast(StageResult[str], plan_query(marked))
-        query = cast(Query[TMarked], self._query)
-        with self._tracer.span("llm.query") as span:
-            response = query.query(marked)
-            span.attributes["response_length"] = len(response)
-            return CompletedStage(response)
+        return self._query.plan_query(marked)
 
     def _resolve_query_step(
         self,
         *,
         query_step: StageResult[str],
         items: list[TItem],
-        marked: TMarked,
         prepared_text: str,
         item_count: int,
         mapping: OffsetMapping | None,
@@ -378,7 +327,6 @@ class Pipeline(Generic[TItem, TMarked, TParsed, TValue, TResult]):
                     query_step=query_step,
                     responses=responses,
                     items=items,
-                    marked=marked,
                     prepared_text=prepared_text,
                     item_count=item_count,
                     mapping=mapping,
@@ -387,7 +335,6 @@ class Pipeline(Generic[TItem, TMarked, TParsed, TValue, TResult]):
         return self._complete_after_response(
             response=query_step.value,
             items=items,
-            marked=marked,
             prepared_text=prepared_text,
             item_count=item_count,
             mapping=mapping,
@@ -399,7 +346,6 @@ class Pipeline(Generic[TItem, TMarked, TParsed, TValue, TResult]):
         query_step: PendingStage[str],
         responses: list[LLMResponse],
         items: list[TItem],
-        marked: TMarked,
         prepared_text: str,
         item_count: int,
         mapping: OffsetMapping | None,
@@ -411,7 +357,6 @@ class Pipeline(Generic[TItem, TMarked, TParsed, TValue, TResult]):
                 return self._resolve_query_step(
                     query_step=next_step,
                     items=items,
-                    marked=marked,
                     prepared_text=prepared_text,
                     item_count=item_count,
                     mapping=mapping,
@@ -420,7 +365,6 @@ class Pipeline(Generic[TItem, TMarked, TParsed, TValue, TResult]):
             return self._complete_after_response(
                 response=next_step.value,
                 items=items,
-                marked=marked,
                 prepared_text=prepared_text,
                 item_count=item_count,
                 mapping=mapping,
@@ -431,7 +375,6 @@ class Pipeline(Generic[TItem, TMarked, TParsed, TValue, TResult]):
         *,
         response: str,
         items: list[TItem],
-        marked: TMarked,
         prepared_text: str,
         item_count: int,
         mapping: OffsetMapping | None,
@@ -525,13 +468,12 @@ class Pipeline(Generic[TItem, TMarked, TParsed, TValue, TResult]):
             assert pending_processor is not None
             return _SessionPending(
                 requests=pending_processor.requests,
-                resume=lambda responses: self._resume_postprocessor(
-                    processor_step=pending_processor,
+                resume=self._make_postprocessor_resume(
+                    pending_processor,
                     prepared_text=prepared_text,
                     item_count=item_count,
                     mapping=mapping,
                     index=index,
-                    responses=responses,
                 ),
             )
 
@@ -566,13 +508,12 @@ class Pipeline(Generic[TItem, TMarked, TParsed, TValue, TResult]):
         if isinstance(processor_result, PendingStage):
             return _SessionPending(
                 requests=processor_result.requests,
-                resume=lambda next_responses: self._resume_postprocessor(
-                    processor_step=processor_result,
+                resume=self._make_postprocessor_resume(
+                    processor_result,
                     prepared_text=prepared_text,
                     item_count=item_count,
                     mapping=mapping,
                     index=index,
-                    responses=next_responses,
                 ),
             )
         return self._resolve_postprocessors(
@@ -582,6 +523,29 @@ class Pipeline(Generic[TItem, TMarked, TParsed, TValue, TResult]):
             mapping=mapping,
             index=index + 1,
         )
+
+    def _make_postprocessor_resume(
+        self,
+        processor_step: PendingStage[PipelineState[TItem, TValue]],
+        *,
+        prepared_text: str,
+        item_count: int,
+        mapping: OffsetMapping | None,
+        index: int,
+    ) -> Callable[[list[LLMResponse]], SessionStep[TResult]]:
+        """Create a resume callable for pending postprocessor stages."""
+
+        def resume(responses: list[LLMResponse]) -> SessionStep[TResult]:
+            return self._resume_postprocessor(
+                processor_step=processor_step,
+                prepared_text=prepared_text,
+                item_count=item_count,
+                mapping=mapping,
+                index=index,
+                responses=responses,
+            )
+
+        return resume
 
     def _restore_offsets(
         self,

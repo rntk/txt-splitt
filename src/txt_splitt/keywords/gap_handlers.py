@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from typing import TYPE_CHECKING, cast
 
 from txt_splitt.keywords.results import build_keywords
-from txt_splitt.keywords.types import Keyword, Word
+from txt_splitt.keywords.types import Keyword, MarkedWords, Word
+from txt_splitt.pipeline import CompletedStage, PendingStage
+from txt_splitt.protocols import LLMResponse
 from txt_splitt.tracer import NoOpTracer
 
 if TYPE_CHECKING:
@@ -29,6 +32,7 @@ class RepairingGapHandler:
         llm: KeywordLLMStrategy,
         parser: KeywordParser,
         min_gap_words: int = 20,
+        request_executor: Callable[[str, float], str] | None = None,
         tracer: Tracer | None = None,
     ) -> None:
         if min_gap_words < 1:
@@ -38,6 +42,7 @@ class RepairingGapHandler:
         self._llm = llm
         self._parser = parser
         self.min_gap_words = min_gap_words
+        self._request_executor = request_executor
         self._tracer = tracer if tracer is not None else NoOpTracer()
 
     def handle(
@@ -68,7 +73,11 @@ class RepairingGapHandler:
                     continue
 
                 marked = self._marker.mark(gap_text, sub_words)
-                response = self._llm.query(marked)
+                response = _drive_llm(
+                    self._llm,
+                    marked,
+                    request_executor=self._request_executor,
+                )
                 index_ranges = self._parser.parse(response, marked.word_count)
                 found = build_keywords(index_ranges, sub_words, gap_text)
                 span.attributes["llm_response"] = response
@@ -139,3 +148,45 @@ def _merge_keywords(existing: list[Keyword], new: list[Keyword]) -> list[Keyword
             result.append(candidate)
     result.sort(key=lambda keyword: keyword.start)
     return result
+
+
+def _drive_llm(
+    llm: KeywordLLMStrategy,
+    marked: MarkedWords,
+    *,
+    request_executor: Callable[[str, float], str] | None = None,
+) -> str:
+    """Drive plan_query() by executing staged requests synchronously."""
+    stage = llm.plan_query(marked)
+    if isinstance(stage, CompletedStage):
+        return stage.value
+
+    executor = (
+        request_executor
+        if request_executor is not None
+        else _infer_request_executor(llm)
+    )
+    while isinstance(stage, PendingStage):
+        responses = [
+            LLMResponse(content=executor(request.prompt, request.temperature))
+            for request in stage.requests
+        ]
+        stage = stage.resume(responses)
+    return stage.value
+
+
+def _infer_request_executor(llm: KeywordLLMStrategy) -> Callable[[str, float], str]:
+    direct_call = getattr(llm, "call", None)
+    if callable(direct_call):
+        return cast(Callable[[str, float], str], direct_call)
+
+    client = getattr(llm, "_client", None)
+    client_call = getattr(client, "call", None)
+    if callable(client_call):
+        return cast(Callable[[str, float], str], client_call)
+
+    msg = (
+        "Gap handler LLM emitted deferred requests but no synchronous request "
+        "executor was available"
+    )
+    raise RuntimeError(msg)

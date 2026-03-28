@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from txt_splitt.errors import LLMError
 from txt_splitt.keywords.types import MarkedWords
 from txt_splitt.llms.utils import looks_repetitive
+from txt_splitt.pipeline import CompletedStage, StageResult
 
 if TYPE_CHECKING:
     from txt_splitt.keywords.protocols import MarkedWordsChunker
@@ -67,6 +68,8 @@ class KeywordExtractionLLM:
     (overlap regions may produce repeated indices).
     """
 
+    response_format: str = "text"
+
     def __init__(
         self,
         client: LLMCallable,
@@ -82,7 +85,7 @@ class KeywordExtractionLLM:
         self._max_keywords = max_keywords
         self._prompt_builder = prompt_builder
 
-    def query(self, marked: MarkedWords) -> str:
+    def plan_query(self, marked: MarkedWords) -> StageResult[str]:
         chunks = self._chunker.chunk(marked) if self._chunker is not None else [marked]
 
         all_responses: list[str] = []
@@ -101,11 +104,11 @@ class KeywordExtractionLLM:
             all_responses.append(response)
 
         if len(all_responses) == 1:
-            return all_responses[0]
+            return CompletedStage(all_responses[0])
 
         # Merge responses: collect all tokens, deduplicate
         merged = _merge_responses(all_responses)
-        return merged
+        return CompletedStage(merged)
 
 
 def _merge_responses(responses: list[str]) -> str:

@@ -2,6 +2,7 @@
 
 import pytest
 
+from txt_splitt.pipeline import CompletedStage, StageResult
 from txt_splitt.sentences.builders import build_pipeline
 from txt_splitt.sentences.types import (
     MarkedText,
@@ -200,11 +201,13 @@ class StubMarker:
 
 
 class StubLLMStrategy:
+    response_format: str = "text"
+
     def __init__(self, response: str) -> None:
         self._response = response
 
-    def query(self, marked_text: MarkedText) -> str:
-        return self._response
+    def plan_query(self, marked_text: MarkedText) -> StageResult[str]:
+        return CompletedStage(self._response)
 
 
 class StubParser:
@@ -292,17 +295,16 @@ class TestPipelineTracing:
         assert root.name == "pipeline.run"
         assert root.attributes["input_length"] == 9
 
-        # 5 child stages (no enhancer)
+        # 4 child stages (no enhancer)
         children = root.children
-        assert len(children) == 5
+        assert len(children) == 4
         assert children[0].name == "split"
         assert children[0].attributes["sentence_count"] == 3
         assert children[1].name == "mark"
         assert children[1].attributes["tagged_text_length"] == 6
-        assert children[2].name == "llm.query"
-        assert children[3].name == "parse"
-        assert children[3].attributes["group_count"] == 1
-        assert children[4].name == "gap_handler"
+        assert children[2].name == "parse"
+        assert children[2].attributes["group_count"] == 1
+        assert children[3].name == "gap_handler"
 
     def test_pipeline_with_tracer_and_enhancer(self) -> None:
         tracer = Tracer()
@@ -327,8 +329,8 @@ class TestPipelineTracing:
         pipeline.run("text")
 
         root = tracer.spans[0]
-        assert len(root.children) == 6
-        assert root.children[5].name == "enhance"
+        assert len(root.children) == 5
+        assert root.children[4].name == "enhance"
 
     def test_format_contains_all_stages(self) -> None:
         tracer = Tracer()
@@ -348,6 +350,5 @@ class TestPipelineTracing:
         assert "pipeline.run" in output
         assert "split" in output
         assert "mark" in output
-        assert "llm.query" in output
         assert "parse" in output
         assert "gap_handler" in output
