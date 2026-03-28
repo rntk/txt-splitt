@@ -127,13 +127,11 @@ def _build_refine_subtopics_prompt(
 
 A new sentence starts only on lines that begin with {{N}}. Wrapped lines without a marker belong to the same sentence. Newlines between marker lines are formatting separators — do NOT treat every newline as a topic boundary.
 
-Parent Topic (hint only): {parent_topic}
-{context_note}
 Rules:
 1. Cover every assignable marker exactly once. Do not skip leftover markers.
 2. Trust the content over the parent topic. If the parent label and content disagree, label the actual content.
 3. Respect sentence grammar when placing boundaries. A sentence that begins under one subtopic must end under the same subtopic — never split a sentence across two subtopics. If a marker continues a thought from the previous marker, keep both together. Prefer extending a subtopic's range by one marker over breaking a grammatically connected sentence.
-4. Prefer fewer, broader subtopics — output 1-4 total. Only split when subjects are genuinely different, not just different examples, facets, or named entities within the same theme. If the section has fewer than 6 markers, output exactly 1 subtopic covering all markers. If unsure, merge.
+4. Prefer fewer, broader subtopics. If the section has fewer than 6 markers, output exactly 1 subtopic covering all markers. If unsure, merge. For sections up to ~15 markers, output 1-4 subtopics. For larger sections, you may output more subtopics when genuinely distinct subjects exist, but still merge related items. Only split when subjects are genuinely different, not just different examples, facets, or named entities within the same theme. Exception: when consecutive markers each describe a fully independent news item — a separate story about a different entity, event, or domain, with no connecting narrative thread — treat each as a distinct subject even if they appear under a shared editorial heading. Editorial grouping (a "briefs" or "roundup" section) does not make items one topic; the actual subject matter does.
 5. Boilerplate merging (CRITICAL): Structural lines — headers, bylines, image captions, source credits, CTAs, subscribe links, feedback forms, team sign-offs, social media links, unsubscribe/legal text, and any other admin/promotional content — are NOT separate topics. Always attach them to the nearest real-content subtopic by extending its range. Never create a standalone subtopic whose content is primarily boilerplate. Never use structural or positional labels: specifically forbidden are "Header", "Footer", "Intro", "Closing", "Opening", "Greeting", "Subscription", "Community Highlights", "Highlights", "Digest", "Newsletter", "Roundup", "Quick Hits", "Admin", "Metadata", "Corporate Actions", "Product Launches".
 6. Use specific, content-driven labels that name the actual subject. Prefer named entities — specific products, tools, people, places, laws, studies, or events (e.g., "Loire Valley Drought & Wine Harvest" not "Agriculture", "Open-Source LLM Benchmark Results" not "Model Comparison"). Always output flat, single-level labels — never use ">". Do not repeat words already in the parent topic label. Keep labels under 5 words; drop trailing filler words like "Overview", "Comparison", "Analysis", "Discussion", "Update", "Details".
 7. Identify natural topic boundaries first, then assign ranges.
@@ -149,6 +147,10 @@ Open-Source LLM Speed Comparison: 12-22
 Example (genuinely distinct subjects):
 Coral Reef Bleaching in the Pacific: 12-16
 Carbon Credit Market Expansion: 17-22
+
+Parent Topic (hint only): {parent_topic}
+
+{context_note}
 
 <content>
 {tagged_text}
