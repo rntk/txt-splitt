@@ -1,7 +1,8 @@
 """Enhancer implementations for refining group boundaries."""
 
 from txt_splitt.errors import EnhancerError
-from txt_splitt.protocols import LLMCallable
+from txt_splitt.pipeline import CompletedStage, PendingStage, StageResult
+from txt_splitt.protocols import LLMCallable, LLMRequest, LLMResponse
 from txt_splitt.sentences.types import Sentence, SentenceGroup, _indices_to_ranges
 
 _CONTEXT_SIZE = 3
@@ -18,7 +19,7 @@ class ShortSentenceEnhancer:
 
     def __init__(
         self,
-        client: LLMCallable,
+        client: LLMCallable | None = None,
         *,
         min_length: int = 40,
         temperature: float = 0.0,
@@ -32,6 +33,9 @@ class ShortSentenceEnhancer:
         groups: list[SentenceGroup],
         sentences: list[Sentence],
     ) -> list[SentenceGroup]:
+        if self._client is None:
+            msg = "ShortSentenceEnhancer.enhance() requires a configured client"
+            raise EnhancerError(msg)
         sentence_count = len(sentences)
         if sentence_count <= 1 or len(groups) <= 1:
             return groups
@@ -105,6 +109,90 @@ class ShortSentenceEnhancer:
 
         return result
 
+    def plan_enhance(
+        self,
+        groups: list[SentenceGroup],
+        sentences: list[Sentence],
+    ) -> StageResult[list[SentenceGroup]]:
+        sentence_count = len(sentences)
+        if sentence_count <= 1 or len(groups) <= 1:
+            return CompletedStage(groups)
+
+        ownership: dict[int, int] = {}
+        for gi, group in enumerate(groups):
+            for r in group.ranges:
+                for si in range(r.start, r.end + 1):
+                    ownership[si] = gi
+
+        candidates: list[tuple[int, int, int, str]] = []
+        for i in range(sentence_count - 1):
+            if ownership[i] != ownership[i + 1]:
+                gi_a = ownership[i]
+                gi_b = ownership[i + 1]
+                if len(sentences[i].text) < self._min_length:
+                    candidates.append(
+                        (
+                            i,
+                            gi_a,
+                            gi_b,
+                            _build_reassignment_prompt(
+                                sentence_text=sentences[i].text,
+                                prev_label=groups[gi_a].label,
+                                prev_context=_gather_context(
+                                    sentences, ownership, gi_a, i, -1
+                                ),
+                                next_label=groups[gi_b].label,
+                                next_context=_gather_context(
+                                    sentences, ownership, gi_b, i, 1
+                                ),
+                            ),
+                        )
+                    )
+                if len(sentences[i + 1].text) < self._min_length:
+                    candidates.append(
+                        (
+                            i + 1,
+                            gi_b,
+                            gi_a,
+                            _build_reassignment_prompt(
+                                sentence_text=sentences[i + 1].text,
+                                prev_label=groups[gi_a].label,
+                                prev_context=_gather_context(
+                                    sentences, ownership, gi_a, i + 1, -1
+                                ),
+                                next_label=groups[gi_b].label,
+                                next_context=_gather_context(
+                                    sentences, ownership, gi_b, i + 1, 1
+                                ),
+                            ),
+                        )
+                    )
+
+        if not candidates:
+            return CompletedStage(groups)
+
+        requests = tuple(
+            LLMRequest(
+                prompt=prompt,
+                temperature=self._temperature,
+                stage_name="enhancer.short_sentence",
+                metadata={"namespace": "short-sentence-enhancer"},
+            )
+            for _, _, _, prompt in candidates
+        )
+        return PendingStage(
+            requests=requests,
+            resume=lambda responses: CompletedStage(
+                _apply_short_sentence_responses(
+                    groups=groups,
+                    sentences=sentences,
+                    ownership=dict(ownership),
+                    candidates=candidates,
+                    responses=responses,
+                )
+            ),
+        )
+
 
 def _gather_context(
     sentences: list[Sentence],
@@ -175,3 +263,44 @@ def _parse_reassignment_response(response: str) -> str | None:
     if has_next and not has_previous:
         return "next"
     return None
+
+
+def _apply_short_sentence_responses(
+    *,
+    groups: list[SentenceGroup],
+    sentences: list[Sentence],
+    ownership: dict[int, int],
+    candidates: list[tuple[int, int, int, str]],
+    responses: list[LLMResponse],
+) -> list[SentenceGroup]:
+    del sentences
+    for (sent_idx, from_group, to_group, _), response in zip(
+        candidates, responses, strict=True
+    ):
+        if ownership[sent_idx] != from_group:
+            continue
+        if sent_idx > 0 and ownership.get(sent_idx - 1) == to_group:
+            prev_gi, next_gi = to_group, from_group
+        else:
+            prev_gi, next_gi = from_group, to_group
+        decision = _parse_reassignment_response(response.content)
+        if decision == "previous":
+            ownership[sent_idx] = prev_gi
+        elif decision == "next":
+            ownership[sent_idx] = next_gi
+
+    group_sentences: dict[int, list[int]] = {i: [] for i in range(len(groups))}
+    for si, owner in ownership.items():
+        group_sentences[owner].append(si)
+
+    result: list[SentenceGroup] = []
+    for gi, group in enumerate(groups):
+        indices = group_sentences[gi]
+        if indices:
+            result.append(
+                SentenceGroup(
+                    label=group.label,
+                    ranges=tuple(_indices_to_ranges(indices)),
+                )
+            )
+    return result

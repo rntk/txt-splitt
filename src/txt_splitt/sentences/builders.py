@@ -3,9 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Sequence
+from typing import TYPE_CHECKING, Sequence, cast
 
-from txt_splitt.pipeline import Pipeline, PipelineState, PostProcessor
+from txt_splitt.pipeline import (
+    CompletedStage,
+    PendingStage,
+    Pipeline,
+    PipelineSession,
+    PipelineState,
+    PostProcessor,
+    StageResult,
+)
 from txt_splitt.sentences.joiners import join_sentences_by_groups
 from txt_splitt.sentences.types import MarkedText, Sentence, SentenceGroup, SplitResult
 from txt_splitt.tracer import NoOpTracer
@@ -20,6 +28,7 @@ if TYPE_CHECKING:
         MarkerStrategy,
         RangeAssigner,
         ResponseParser,
+        SchedulableLLMStrategy,
         SentenceSplitter,
         TopicExtractor,
     )
@@ -36,6 +45,24 @@ class _SentenceResultFactory:
             sentences=tuple(state.items),
             groups=tuple(state.value),
         )
+
+
+def _wrap_groups_result(
+    stage_result: StageResult[list[SentenceGroup]],
+    items: list[Sentence],
+) -> StageResult[PipelineState[Sentence, list[SentenceGroup]]]:
+    """Wrap a StageResult of groups into a StageResult of PipelineState."""
+    if isinstance(stage_result, CompletedStage):
+        return CompletedStage(
+            PipelineState(items=list(items), value=stage_result.value)
+        )
+    return PendingStage(
+        requests=stage_result.requests,
+        resume=lambda responses: _wrap_groups_result(
+            stage_result.resume(responses),
+            items,
+        ),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +85,37 @@ class _GapHandlerProcessor(PostProcessor[Sentence, list[SentenceGroup]]):
         )
         return PipelineState(items=list(state.items), value=groups)
 
+    def plan_process(
+        self,
+        state: PipelineState[Sentence, list[SentenceGroup]],
+        *,
+        text: str,
+        item_count: int,
+    ) -> StageResult[PipelineState[Sentence, list[SentenceGroup]]]:
+        del text
+        plan_handle = getattr(self.gap_handler, "plan_handle", None)
+        if not callable(plan_handle):
+            return CompletedStage(self.process(state, text="", item_count=item_count))
+        stage_result = cast(
+            StageResult[list[SentenceGroup]],
+            plan_handle(
+                state.value,
+                item_count,
+                sentences=state.items,
+            ),
+        )
+        if isinstance(stage_result, CompletedStage):
+            return CompletedStage(
+                PipelineState(items=list(state.items), value=stage_result.value)
+            )
+        return PendingStage(
+            requests=stage_result.requests,
+            resume=lambda responses: _wrap_groups_result(
+                stage_result.resume(responses),
+                state.items,
+            ),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class _EnhancerProcessor(PostProcessor[Sentence, list[SentenceGroup]]):
@@ -74,6 +132,33 @@ class _EnhancerProcessor(PostProcessor[Sentence, list[SentenceGroup]]):
         del text, item_count
         groups = self.enhancer.enhance(state.value, state.items)
         return PipelineState(items=list(state.items), value=groups)
+
+    def plan_process(
+        self,
+        state: PipelineState[Sentence, list[SentenceGroup]],
+        *,
+        text: str,
+        item_count: int,
+    ) -> StageResult[PipelineState[Sentence, list[SentenceGroup]]]:
+        del text, item_count
+        plan_enhance = getattr(self.enhancer, "plan_enhance", None)
+        if not callable(plan_enhance):
+            return CompletedStage(self.process(state, text="", item_count=0))
+        stage_result = cast(
+            StageResult[list[SentenceGroup]],
+            plan_enhance(state.value, state.items),
+        )
+        if isinstance(stage_result, CompletedStage):
+            return CompletedStage(
+                PipelineState(items=list(state.items), value=stage_result.value)
+            )
+        return PendingStage(
+            requests=stage_result.requests,
+            resume=lambda responses: _wrap_groups_result(
+                stage_result.resume(responses),
+                state.items,
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,12 +233,15 @@ class SentencePipeline:
         list[SentenceGroup],
         SplitResult,
     ]
-    _llm: LLMStrategy | None
+    _llm: LLMStrategy | SchedulableLLMStrategy | None
     _topic_extractor: TopicExtractor | None
     _range_assigner: RangeAssigner | None
     _gap_handler: GapHandler
     _enhancers: tuple[Enhancer, ...]
     _tracer: Tracer | NoOpTracer
+
+    def start(self, text: str) -> PipelineSession[SplitResult]:
+        return self._pipeline.start(text)
 
     def run(self, text: str) -> SplitResult:
         return self._pipeline.run(text)
@@ -168,7 +256,7 @@ def build_pipeline(
     marker: MarkerStrategy,
     parser: ResponseParser,
     gap_handler: GapHandler,
-    llm: LLMStrategy | None = None,
+    llm: LLMStrategy | SchedulableLLMStrategy | None = None,
     topic_extractor: TopicExtractor | None = None,
     range_assigner: RangeAssigner | None = None,
     enhancers: Sequence[Enhancer] | None = None,

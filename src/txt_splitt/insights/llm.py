@@ -7,7 +7,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from txt_splitt.protocols import LLMCallable
-from txt_splitt.retry import RetryPolicy
 from txt_splitt.sentences.llm import HierarchicalTopicRangeLLM
 
 if TYPE_CHECKING:
@@ -21,7 +20,6 @@ def build_insight_llm(
     *,
     temperature: float = 0.0,
     chunker: MarkedTextChunker | None = None,
-    retry_policy: RetryPolicy | None = None,
 ) -> HierarchicalTopicRangeLLM:
     """Create a HierarchicalTopicRangeLLM configured for insight extraction.
 
@@ -33,7 +31,6 @@ def build_insight_llm(
         client=client,
         temperature=temperature,
         chunker=chunker,
-        retry_policy=retry_policy,
         coarse_prompt_builder=_build_insights_prompt,
     )
 

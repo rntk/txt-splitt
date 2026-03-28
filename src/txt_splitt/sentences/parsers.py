@@ -1,9 +1,7 @@
 """Response parser implementations."""
 
-import json
 import re
 from collections.abc import Iterable
-from typing import Literal
 
 from txt_splitt.errors import ParseError
 from txt_splitt.sentences.types import SentenceGroup, SentenceRange
@@ -30,33 +28,14 @@ class TopicRangeParser:
     Does NOT fill gaps or validate coverage (that's the GapHandler's job).
     """
 
-    def __init__(self, *, input_mode: Literal["text", "json", "auto"] = "text") -> None:
-        if input_mode not in {"text", "json", "auto"}:
-            msg = f"input_mode must be 'text', 'json', or 'auto', got {input_mode!r}"
-            raise ValueError(msg)
-        self._input_mode = input_mode
-
     @property
     def supported_response_formats(self) -> frozenset[str]:
-        if self._input_mode == "json":
-            return frozenset({"json"})
-        if self._input_mode == "auto":
-            return frozenset({"text", "json"})
         return frozenset({"text"})
 
     def parse(self, response: str, sentence_count: int) -> list[SentenceGroup]:
         if sentence_count <= 0:
             raise ParseError("sentence_count must be positive")
-        if self._input_mode == "text":
-            return _parse_text_groups(response, sentence_count)
-        if self._input_mode == "json":
-            return _parse_json_groups(response, sentence_count)
-
-        # auto mode: prefer JSON when possible, then fallback to text.
-        try:
-            return _parse_json_groups(response, sentence_count)
-        except ParseError:
-            return _parse_text_groups(response, sentence_count)
+        return _parse_text_groups(response, sentence_count)
 
 
 def _parse_text_groups(response: str, sentence_count: int) -> list[SentenceGroup]:
@@ -101,84 +80,6 @@ def _parse_text_groups(response: str, sentence_count: int) -> list[SentenceGroup
             grouped_ranges[label].extend(clamped)
 
     return _build_groups(grouped_ranges, label_order)
-
-
-def _parse_json_groups(response: str, sentence_count: int) -> list[SentenceGroup]:
-    max_index = sentence_count - 1
-    grouped_ranges: dict[tuple[str, ...], list[SentenceRange]] = {}
-    label_order: list[tuple[str, ...]] = []
-
-    for root in _parse_json_documents(response):
-        topics = root.get("topics")
-        if not isinstance(topics, list):
-            continue
-        for topic in topics:
-            if not isinstance(topic, dict):
-                continue
-            label_obj = topic.get("label")
-            if not isinstance(label_obj, list):
-                continue
-            label = _normalize_label_parts(
-                part for part in label_obj if isinstance(part, str)
-            )
-            if not label:
-                continue
-
-            ranges_obj = topic.get("ranges")
-            if not isinstance(ranges_obj, list):
-                continue
-
-            clamped: list[SentenceRange] = []
-            for range_obj in ranges_obj:
-                if not isinstance(range_obj, dict):
-                    continue
-                start = range_obj.get("start")
-                end = range_obj.get("end")
-                if not isinstance(start, int) or not isinstance(end, int):
-                    continue
-                clamped_range = _clamp_range(start, end, max_index)
-                if clamped_range is not None:
-                    clamped.append(clamped_range)
-
-            if clamped:
-                if label not in grouped_ranges:
-                    grouped_ranges[label] = []
-                    label_order.append(label)
-                grouped_ranges[label].extend(clamped)
-
-    return _build_groups(grouped_ranges, label_order)
-
-
-def _parse_json_documents(response: str) -> list[dict[str, object]]:
-    decoder = json.JSONDecoder()
-    idx = 0
-    documents: list[dict[str, object]] = []
-
-    while idx < len(response):
-        while idx < len(response) and response[idx].isspace():
-            idx += 1
-        if idx >= len(response):
-            break
-        try:
-            payload, next_idx = decoder.raw_decode(response, idx)
-        except json.JSONDecodeError as e:
-            raise ParseError(f"Invalid JSON response: {e.msg}") from e
-        idx = next_idx
-        _collect_root_documents(payload, documents)
-
-    return documents
-
-
-def _collect_root_documents(
-    payload: object, documents: list[dict[str, object]]
-) -> None:
-    if isinstance(payload, dict):
-        documents.append(payload)
-        return
-    if isinstance(payload, list):
-        for item in payload:
-            if isinstance(item, dict):
-                documents.append(item)
 
 
 def _build_groups(

@@ -1,8 +1,6 @@
 """Response parser for insight extraction."""
 
-import json
 import re
-from typing import Literal
 
 from txt_splitt.errors import ParseError
 from txt_splitt.insights.types import Insight
@@ -31,25 +29,10 @@ class InsightParser:
     Ranges are clamped to [0, sentence_count-1].
     """
 
-    def __init__(self, *, input_mode: Literal["text", "json", "auto"] = "text") -> None:
-        if input_mode not in {"text", "json", "auto"}:
-            msg = f"input_mode must be 'text', 'json', or 'auto', got {input_mode!r}"
-            raise ValueError(msg)
-        self._input_mode = input_mode
-
     def parse(self, response: str, sentence_count: int) -> list[Insight]:
         if sentence_count <= 0:
             raise ParseError("sentence_count must be positive")
-        if self._input_mode == "text":
-            return _parse_text_insights(response, sentence_count)
-        if self._input_mode == "json":
-            return _parse_json_insights(response, sentence_count)
-
-        # auto mode: prefer JSON, fall back to text
-        try:
-            return _parse_json_insights(response, sentence_count)
-        except ParseError:
-            return _parse_text_insights(response, sentence_count)
+        return _parse_text_insights(response, sentence_count)
 
 
 def _normalize_name(name: str) -> str:
@@ -162,70 +145,5 @@ def _parse_text_insights(response: str, sentence_count: int) -> list[Insight]:
                 name_order.append(norm)
                 canonical_names[norm] = name
             grouped_ranges[norm].extend(clamped)
-
-    return _build_insights(grouped_ranges, name_order, canonical_names)
-
-
-def _parse_json_insights(response: str, sentence_count: int) -> list[Insight]:
-    max_index = sentence_count - 1
-    grouped_ranges: dict[str, list[SentenceRange]] = {}
-    name_order: list[str] = []
-    canonical_names: dict[str, str] = {}
-
-    decoder = json.JSONDecoder()
-    idx = 0
-    documents: list[dict[str, object]] = []
-
-    while idx < len(response):
-        while idx < len(response) and response[idx].isspace():
-            idx += 1
-        if idx >= len(response):
-            break
-        try:
-            payload, next_idx = decoder.raw_decode(response, idx)
-        except json.JSONDecodeError as e:
-            raise ParseError(f"Invalid JSON response: {e.msg}") from e
-        idx = next_idx
-        if isinstance(payload, dict):
-            documents.append(payload)
-        elif isinstance(payload, list):
-            for item in payload:
-                if isinstance(item, dict):
-                    documents.append(item)
-
-    for root in documents:
-        insights_list = root.get("insights")
-        if not isinstance(insights_list, list):
-            continue
-        for entry in insights_list:
-            if not isinstance(entry, dict):
-                continue
-            name = entry.get("name")
-            if not isinstance(name, str) or not name.strip():
-                continue
-            name = name.strip()
-            ranges_obj = entry.get("ranges")
-            if not isinstance(ranges_obj, list):
-                continue
-
-            clamped: list[SentenceRange] = []
-            for range_obj in ranges_obj:
-                if not isinstance(range_obj, dict):
-                    continue
-                start = range_obj.get("start")
-                end = range_obj.get("end")
-                if not isinstance(start, int) or not isinstance(end, int):
-                    continue
-                clamped_range = _clamp_range(start, end, max_index)
-                if clamped_range is not None:
-                    clamped.append(clamped_range)
-
-            if clamped:
-                norm = _normalize_name(name)
-                if norm not in grouped_ranges:
-                    grouped_ranges[norm] = []
-                    name_order.append(norm)
-                    canonical_names[norm] = name
-                grouped_ranges[norm].extend(clamped)
 
     return _build_insights(grouped_ranges, name_order, canonical_names)

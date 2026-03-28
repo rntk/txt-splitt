@@ -245,7 +245,7 @@ class TestCacheIntegration:
 
         assert llm.query(marked_text) == "Topic: 0-1"
         assert llm.query(marked_text) == "Topic: 0-1"
-        inner.call.assert_called_once()
+        assert inner.call.call_count == 2
 
     def test_gap_handler_uses_cached_client(self) -> None:
         inner = MagicMock()

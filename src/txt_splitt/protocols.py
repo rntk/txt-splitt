@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Protocol, TypeVar
 
 from txt_splitt.types import OffsetMapping
@@ -19,6 +20,24 @@ class AsyncLLMCallable(Protocol):
     """Protocol for async LLM client callables."""
 
     async def call(self, prompt: str, temperature: float) -> str: ...
+
+
+@dataclass(frozen=True, slots=True)
+class LLMRequest:
+    """Raw LLM work item emitted by a pipeline session."""
+
+    prompt: str
+    temperature: float
+    response_format: str = "text"
+    stage_name: str = "llm"
+    metadata: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class LLMResponse:
+    """Raw LLM response returned to a pipeline session."""
+
+    content: str
 
 
 class HtmlCleaner(Protocol):

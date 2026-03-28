@@ -7,8 +7,9 @@ import json
 import sys
 from datetime import datetime
 from html import escape
+from multiprocessing.pool import ThreadPool
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 # Add src to path so we can import txt_splitt when running from root
 sys.path.append(str(Path(__file__).parent / "src"))
@@ -18,8 +19,8 @@ from txt_splitt import (
     CachingLLMCallable,
     HtmlCleaner,
     LLMCallable,
-    RetryConfig,
-    RetryingLLMCallable,
+    LLMRequest,
+    LLMResponse,
     SQLiteLLMCacheStore,
     Tracer,
     TracingAsyncLLMCallable,
@@ -531,12 +532,6 @@ def main() -> None:
         action="store_true",
         help="Also cache requests with non-zero temperature",
     )
-    parser.add_argument(
-        "--json",
-        dest="use_json",
-        action="store_true",
-        help="Use JSON output mode for LLM responses (may improve parsing reliability)",
-    )
     args = parser.parse_args()
 
     if args.use_async:
@@ -548,25 +543,44 @@ def main() -> None:
 def create_pipeline(
     args: Any,
     input_path: Path,
-    sync_llm: LLMCallable,
+    sync_llm: LLMCallable | None = None,
     tracer: Tracer | None = None,
     cache_store: SQLiteLLMCacheStore | None = None,
 ) -> SentencePipeline:
     """Create pipeline with appropriate configuration."""
-    topic_range_llm = wrap_sync_llm(
-        sync_llm,
-        namespace="topic-range",
-        args=args,
-        tracer=tracer,
-        cache_store=cache_store,
-    )
-    gap_repair_llm = wrap_sync_llm(
-        sync_llm,
-        namespace="gap-repair",
-        args=args,
-        tracer=tracer,
-        cache_store=cache_store,
-    )
+    topic_range_llm = None
+    gap_repair_llm = None
+    short_sentence_llm = None
+    boundary_llm = None
+    if sync_llm is not None:
+        topic_range_llm = wrap_sync_llm(
+            sync_llm,
+            namespace="topic-range",
+            args=args,
+            tracer=tracer,
+            cache_store=cache_store,
+        )
+        gap_repair_llm = wrap_sync_llm(
+            sync_llm,
+            namespace="gap-repair",
+            args=args,
+            tracer=tracer,
+            cache_store=cache_store,
+        )
+        short_sentence_llm = wrap_sync_llm(
+            sync_llm,
+            namespace="short-sentence-enhancer",
+            args=args,
+            tracer=tracer,
+            cache_store=cache_store,
+        )
+        boundary_llm = wrap_sync_llm(
+            sync_llm,
+            namespace="boundary-evaluator",
+            args=args,
+            tracer=tracer,
+            cache_store=cache_store,
+        )
     splitter = SparseRegexSentenceSplitter(
         anchor_every_words=args.anchor_words,
         long_sentence_word_threshold=args.long_sentence_threshold,
@@ -582,13 +596,7 @@ def create_pipeline(
     if args.short_sentence_min_length > 0:
         enhancers.append(
             ShortSentenceEnhancer(
-                wrap_sync_llm(
-                    sync_llm,
-                    namespace="short-sentence-enhancer",
-                    args=args,
-                    tracer=tracer,
-                    cache_store=cache_store,
-                ),
+                short_sentence_llm,
                 min_length=args.short_sentence_min_length,
                 temperature=args.temperature,
             )
@@ -596,45 +604,23 @@ def create_pipeline(
     if args.boundary_max_shift > 0:
         enhancers.append(
             BoundaryEvaluator(
-                wrap_sync_llm(
-                    sync_llm,
-                    namespace="boundary-evaluator",
-                    args=args,
-                    tracer=tracer,
-                    cache_store=cache_store,
-                ),
+                boundary_llm,
                 context_window=args.boundary_context_window,
                 max_shift=args.boundary_max_shift,
                 temperature=args.temperature,
             )
         )
 
-    output_mode: Literal["text", "json"] = (
-        "json" if getattr(args, "use_json", False) else "text"
-    )
-    parser_mode: Literal["text", "json", "auto"] = (
-        "json" if output_mode == "json" else "text"
-    )
-    retry_policy = RetryConfig(
-        max_attempts=3,
-        temperature_schedule=[
-            args.temperature + 0.1,
-            args.temperature + 0.3,
-            args.temperature + 0.5,
-        ],
-    )
-
     if args.single_stage:
         return build_pipeline(
             splitter=splitter,
             marker=OptimizingMarker(BracketMarker()),
             llm=HierarchicalTopicRangeLLM(
-                client=topic_range_llm,
+                topic_range_llm,
                 temperature=args.temperature,
                 chunker=OverlapChunker(max_chars=args.max_chunk_chars),
-                retry_policy=retry_policy,
             ),
-            parser=TopicRangeParser(input_mode=parser_mode),
+            parser=TopicRangeParser(),
             gap_handler=LLMRepairingGapHandler(
                 gap_repair_llm,
                 temperature=args.temperature,
@@ -653,6 +639,120 @@ def create_pipeline(
     raise NotImplementedError(msg)
 
 
+def _build_clients(
+    *,
+    llm: Any,
+    args: Any,
+    tracer: Tracer | None,
+    cache_store: SQLiteLLMCacheStore | None,
+    wrapper: Callable[..., Any],
+) -> dict[str, Any]:
+    namespaces = (
+        "topic-range",
+        "gap-repair",
+        "short-sentence-enhancer",
+        "boundary-evaluator",
+    )
+    return {
+        namespace: wrapper(
+            llm,
+            namespace=namespace,
+            args=args,
+            tracer=tracer,
+            cache_store=cache_store,
+        )
+        for namespace in namespaces
+    }
+
+
+def _build_sync_clients(
+    *,
+    llm: LLMCallable,
+    args: Any,
+    tracer: Tracer | None,
+    cache_store: SQLiteLLMCacheStore | None,
+) -> dict[str, LLMCallable]:
+    return _build_clients(
+        llm=llm,
+        args=args,
+        tracer=tracer,
+        cache_store=cache_store,
+        wrapper=wrap_sync_llm,
+    )
+
+
+def _build_async_clients(
+    *,
+    llm: AsyncLLMCallable,
+    args: Any,
+    tracer: Tracer | None,
+    cache_store: SQLiteLLMCacheStore | None,
+) -> dict[str, AsyncLLMCallable]:
+    return _build_clients(
+        llm=llm,
+        args=args,
+        tracer=tracer,
+        cache_store=cache_store,
+        wrapper=wrap_async_llm,
+    )
+
+
+def _namespace_for_request(request: LLMRequest) -> str:
+    namespace = request.metadata.get("namespace")
+    if isinstance(namespace, str) and namespace.strip():
+        return namespace
+    msg = f"LLMRequest stage '{request.stage_name}' is missing a valid namespace"
+    raise ValueError(msg)
+
+
+def execute_session_sync(
+    pipeline: SentencePipeline,
+    text: str,
+    clients: dict[str, LLMCallable],
+) -> Any:
+    session = pipeline.start(text)
+    with ThreadPool(processes=2) as pool:
+        while not session.is_complete():
+            requests = session.pending_requests()
+            responses = pool.map(
+                lambda request: LLMResponse(
+                    content=clients[_namespace_for_request(request)].call(
+                        request.prompt,
+                        request.temperature,
+                    )
+                ),
+                requests,
+            )
+            session.submit_responses(responses)
+    return session.result()
+
+
+async def execute_session_async(
+    pipeline: SentencePipeline,
+    text: str,
+    clients: dict[str, AsyncLLMCallable],
+    *,
+    max_concurrent: int,
+) -> Any:
+    session = pipeline.start(text)
+    semaphore = asyncio.Semaphore(max_concurrent)
+
+    async def execute_request(request: LLMRequest) -> LLMResponse:
+        async with semaphore:
+            client = clients[_namespace_for_request(request)]
+            return LLMResponse(
+                content=await client.call(request.prompt, request.temperature)
+            )
+
+    while not session.is_complete():
+        requests = session.pending_requests()
+        responses = await asyncio.gather(
+            *(execute_request(request) for request in requests)
+        )
+        session.submit_responses(list(responses))
+    return session.result()
+
+
 def run_sync(args: Any) -> None:
     input_path = Path(args.input_file)
     if not input_path.exists():
@@ -663,9 +763,6 @@ def run_sync(args: Any) -> None:
 
     llm_client = LLamaCPP(host=args.host, model=args.model)
     llm_adapter = LLamaCPPAdapter(llm_client)
-    llm_with_retry: LLMCallable = RetryingLLMCallable(
-        llm_adapter, max_retries=3, backoff_factor=1.0
-    )
 
     tracer: Tracer | None = Tracer() if args.trace else None
     cache_store = build_cache_store(args)
@@ -673,7 +770,11 @@ def run_sync(args: Any) -> None:
     pipeline = create_pipeline(
         args,
         input_path,
-        llm_with_retry,
+        tracer=tracer,
+    )
+    clients = _build_sync_clients(
+        llm=llm_adapter,
+        args=args,
         tracer=tracer,
         cache_store=cache_store,
     )
@@ -681,7 +782,7 @@ def run_sync(args: Any) -> None:
     print(f"Processing '{args.input_file}'...")
     trace_output: str | None = None
     try:
-        result = pipeline.run(text)
+        result = execute_session_sync(pipeline, text, clients)
     except Exception as e:
         print(f"Error processing text: {e}", file=sys.stderr)
         sys.exit(1)
@@ -709,21 +810,21 @@ async def run_async(args: Any) -> None:
 
     text = input_path.read_text(encoding="utf-8")
 
-    sync_llm_client = LLamaCPP(host=args.host, model=args.model)
-    sync_llm_adapter = LLamaCPPAdapter(sync_llm_client)
-
     tracer: Tracer | None = Tracer() if args.trace else None
-    sync_llm_callable: LLMCallable = RetryingLLMCallable(
-        sync_llm_adapter, max_retries=3, backoff_factor=1.0
-    )
+    async_llm_client = AsyncLLamaCPP(host=args.host, model=args.model)
+    async_llm_adapter = AsyncLLamaCPPAdapter(async_llm_client)
     cache_store = build_cache_store(args)
+    async_clients = _build_async_clients(
+        llm=async_llm_adapter,
+        args=args,
+        tracer=tracer,
+        cache_store=cache_store,
+    )
 
     pipeline = create_pipeline(
         args,
         input_path,
-        sync_llm_callable,
         tracer=tracer,
-        cache_store=cache_store,
     )
 
     print(
@@ -732,7 +833,12 @@ async def run_async(args: Any) -> None:
     )
     trace_output: str | None = None
     try:
-        result = await pipeline.run_async(text)
+        result = await execute_session_async(
+            pipeline,
+            text,
+            async_clients,
+            max_concurrent=args.max_concurrent,
+        )
     except Exception as e:
         print(f"Error processing text: {e}", file=sys.stderr)
         sys.exit(1)

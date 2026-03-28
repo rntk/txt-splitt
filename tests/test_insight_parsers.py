@@ -1,8 +1,5 @@
 """Tests for InsightParser."""
 
-import json
-from typing import Literal, cast
-
 import pytest
 
 from txt_splitt.errors import ParseError
@@ -13,11 +10,6 @@ from txt_splitt.sentences.types import SentenceRange
 class TestInsightParserText:
     def setup_method(self) -> None:
         self.parser = InsightParser()
-
-    def test_invalid_input_mode_raises(self) -> None:
-        invalid_mode = cast(Literal["text", "json", "auto"], "yaml")
-        with pytest.raises(ValueError, match="input_mode must be"):
-            InsightParser(input_mode=invalid_mode)
 
     def test_zero_sentence_count_raises(self) -> None:
         with pytest.raises(ParseError, match="sentence_count must be positive"):
@@ -116,121 +108,3 @@ class TestInsightParserText:
         response = "Insight C: 8-9\nInsight A: 0-2\nInsight B: 5-6"
         result = self.parser.parse(response, sentence_count=10)
         assert [i.name for i in result] == ["Insight C", "Insight A", "Insight B"]
-
-
-class TestInsightParserJson:
-    def setup_method(self) -> None:
-        self.parser = InsightParser(input_mode="json")
-
-    def test_basic_json_parsing(self) -> None:
-        payload = json.dumps(
-            {
-                "insights": [
-                    {
-                        "name": "Key Finding",
-                        "ranges": [{"start": 0, "end": 5}],
-                    }
-                ]
-            }
-        )
-        result = self.parser.parse(payload, sentence_count=10)
-        assert len(result) == 1
-        assert result[0].name == "Key Finding"
-        assert result[0].ranges == (SentenceRange(start=0, end=5),)
-
-    def test_multiple_ranges_in_json(self) -> None:
-        payload = json.dumps(
-            {
-                "insights": [
-                    {
-                        "name": "Chunked Insight",
-                        "ranges": [{"start": 0, "end": 3}, {"start": 10, "end": 12}],
-                    }
-                ]
-            }
-        )
-        result = self.parser.parse(payload, sentence_count=20)
-        assert result[0].ranges == (
-            SentenceRange(start=0, end=3),
-            SentenceRange(start=10, end=12),
-        )
-
-    def test_same_name_merges_in_json(self) -> None:
-        """Two JSON objects (from different chunks) with same insight name merge."""
-        obj1 = json.dumps(
-            {"insights": [{"name": "Key Finding", "ranges": [{"start": 0, "end": 3}]}]}
-        )
-        obj2 = json.dumps(
-            {
-                "insights": [
-                    {"name": "Key Finding", "ranges": [{"start": 10, "end": 12}]}
-                ]
-            }
-        )
-        result = self.parser.parse(f"{obj1}\n{obj2}", sentence_count=20)
-        assert len(result) == 1
-        assert result[0].ranges == (
-            SentenceRange(start=0, end=3),
-            SentenceRange(start=10, end=12),
-        )
-
-    def test_invalid_json_raises(self) -> None:
-        with pytest.raises(ParseError, match="Invalid JSON"):
-            self.parser.parse("{not valid json", sentence_count=10)
-
-    def test_empty_insights_array_raises(self) -> None:
-        payload = json.dumps({"insights": []})
-        with pytest.raises(ParseError, match="No valid insights"):
-            self.parser.parse(payload, sentence_count=10)
-
-    def test_range_clamped_in_json(self) -> None:
-        payload = json.dumps(
-            {"insights": [{"name": "Insight", "ranges": [{"start": 0, "end": 999}]}]}
-        )
-        result = self.parser.parse(payload, sentence_count=10)
-        assert result[0].ranges == (SentenceRange(start=0, end=9),)
-
-    def test_non_integer_range_fields_skipped(self) -> None:
-        payload = json.dumps(
-            {
-                "insights": [
-                    {
-                        "name": "Good Insight",
-                        "ranges": [
-                            {"start": "bad", "end": 5},
-                            {"start": 2, "end": 4},
-                        ],
-                    }
-                ]
-            }
-        )
-        result = self.parser.parse(payload, sentence_count=10)
-        assert result[0].ranges == (SentenceRange(start=2, end=4),)
-
-    def test_missing_name_field_skipped(self) -> None:
-        payload = json.dumps(
-            {
-                "insights": [
-                    {"ranges": [{"start": 0, "end": 5}]},
-                    {"name": "Valid Insight", "ranges": [{"start": 0, "end": 5}]},
-                ]
-            }
-        )
-        result = self.parser.parse(payload, sentence_count=10)
-        assert len(result) == 1
-        assert result[0].name == "Valid Insight"
-
-
-class TestInsightParserAutoMode:
-    def test_prefers_json_when_valid(self) -> None:
-        parser = InsightParser(input_mode="auto")
-        payload = json.dumps(
-            {"insights": [{"name": "Key Finding", "ranges": [{"start": 0, "end": 5}]}]}
-        )
-        result = parser.parse(payload, sentence_count=10)
-        assert result[0].name == "Key Finding"
-
-    def test_falls_back_to_text_on_invalid_json(self) -> None:
-        parser = InsightParser(input_mode="auto")
-        result = parser.parse("Key Finding: 0-5", sentence_count=10)
-        assert result[0].name == "Key Finding"

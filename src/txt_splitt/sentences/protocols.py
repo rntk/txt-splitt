@@ -2,6 +2,7 @@
 
 from typing import Protocol
 
+from txt_splitt.pipeline import StageResult
 from txt_splitt.sentences.types import MarkedText, Sentence, SentenceGroup
 
 
@@ -21,6 +22,14 @@ class LLMStrategy(Protocol):
     """Stage 3: Query an LLM with marked text."""
 
     def query(self, marked_text: MarkedText) -> str: ...
+
+
+class SchedulableLLMStrategy(Protocol):
+    """Stage 3: Emit ordered LLM request batches for marked text."""
+
+    response_format: str
+
+    def plan_query(self, marked_text: MarkedText) -> StageResult[str]: ...
 
 
 class ResponseParser(Protocol):
@@ -64,6 +73,18 @@ class Enhancer(Protocol):
     def enhance(
         self, groups: list[SentenceGroup], sentences: list[Sentence]
     ) -> list[SentenceGroup]: ...
+
+
+class SchedulableEnhancer(Protocol):
+    """Stage 6 (optional): Emit ordered LLM batches for boundary refinement."""
+
+    stage_name: str
+
+    def plan_process(
+        self,
+        groups: list[SentenceGroup],
+        sentences: list[Sentence],
+    ) -> StageResult[list[SentenceGroup]]: ...
 
 
 class GroupJoiner(Protocol):

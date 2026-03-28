@@ -1,7 +1,8 @@
 """BoundaryEvaluator enhancer: shift group boundaries using LLM judgment."""
 
 from txt_splitt.errors import EnhancerError
-from txt_splitt.protocols import LLMCallable
+from txt_splitt.pipeline import CompletedStage, PendingStage, StageResult
+from txt_splitt.protocols import LLMCallable, LLMRequest, LLMResponse
 from txt_splitt.sentences.types import Sentence, SentenceGroup, _indices_to_ranges
 
 
@@ -15,7 +16,7 @@ class BoundaryEvaluator:
 
     def __init__(
         self,
-        client: LLMCallable,
+        client: LLMCallable | None = None,
         *,
         context_window: int = 3,
         max_shift: int = 2,
@@ -31,6 +32,9 @@ class BoundaryEvaluator:
         groups: list[SentenceGroup],
         sentences: list[Sentence],
     ) -> list[SentenceGroup]:
+        if self._client is None:
+            msg = "BoundaryEvaluator.enhance() requires a configured client"
+            raise EnhancerError(msg)
         sentence_count = len(sentences)
         if sentence_count <= 1 or len(groups) <= 1:
             return groups
@@ -124,6 +128,80 @@ class BoundaryEvaluator:
             result.append(SentenceGroup(label=group.label, ranges=tuple(ranges)))
 
         return result
+
+    def plan_enhance(
+        self,
+        groups: list[SentenceGroup],
+        sentences: list[Sentence],
+    ) -> StageResult[list[SentenceGroup]]:
+        sentence_count = len(sentences)
+        if sentence_count <= 1 or len(groups) <= 1:
+            return CompletedStage(groups)
+
+        ownership: dict[int, int] = {}
+        for gi, group in enumerate(groups):
+            for r in group.ranges:
+                for si in range(r.start, r.end + 1):
+                    ownership[si] = gi
+
+        boundaries: list[tuple[int, int, int, str]] = []
+        for i in range(sentence_count - 1):
+            if ownership[i] != ownership[i + 1]:
+                left_gi = ownership[i]
+                right_gi = ownership[i + 1]
+                boundaries.append(
+                    (
+                        i,
+                        left_gi,
+                        right_gi,
+                        _build_boundary_prompt(
+                            left_label=groups[left_gi].label,
+                            left_sentences=_gather_boundary_context(
+                                sentences,
+                                ownership,
+                                left_gi,
+                                i,
+                                "left",
+                                self._context_window,
+                            ),
+                            right_label=groups[right_gi].label,
+                            right_sentences=_gather_boundary_context(
+                                sentences,
+                                ownership,
+                                right_gi,
+                                i + 1,
+                                "right",
+                                self._context_window,
+                            ),
+                        ),
+                    )
+                )
+
+        if not boundaries:
+            return CompletedStage(groups)
+
+        requests = tuple(
+            LLMRequest(
+                prompt=prompt,
+                temperature=self._temperature,
+                stage_name="enhancer.boundary_evaluator",
+                metadata={"namespace": "boundary-evaluator"},
+            )
+            for _, _, _, prompt in boundaries
+        )
+        return PendingStage(
+            requests=requests,
+            resume=lambda responses: CompletedStage(
+                _apply_boundary_responses(
+                    groups=groups,
+                    sentences=sentences,
+                    ownership=dict(ownership),
+                    boundaries=boundaries,
+                    responses=responses,
+                    max_shift=self._max_shift,
+                )
+            ),
+        )
 
 
 def _gather_boundary_context(
@@ -223,3 +301,55 @@ def _parse_boundary_response(response: str, max_shift: int) -> tuple[str, int]:
             # No valid number → treat as correct
             return ("correct", 0)
     return ("correct", 0)
+
+
+def _apply_boundary_responses(
+    *,
+    groups: list[SentenceGroup],
+    sentences: list[Sentence],
+    ownership: dict[int, int],
+    boundaries: list[tuple[int, int, int, str]],
+    responses: list[LLMResponse],
+    max_shift: int,
+) -> list[SentenceGroup]:
+    sentence_count = len(sentences)
+    for (boundary_idx, left_gi, right_gi, _), response in zip(
+        boundaries, responses, strict=True
+    ):
+        direction, shift = _parse_boundary_response(response.content, max_shift)
+        if direction == "shift_left" and shift > 0:
+            count = 0
+            idx = boundary_idx + 1
+            while idx < sentence_count and count < shift:
+                if ownership[idx] == right_gi:
+                    ownership[idx] = left_gi
+                    count += 1
+                    idx += 1
+                else:
+                    break
+        elif direction == "shift_right" and shift > 0:
+            count = 0
+            idx = boundary_idx
+            while idx >= 0 and count < shift:
+                if ownership[idx] == left_gi:
+                    ownership[idx] = right_gi
+                    count += 1
+                    idx -= 1
+                else:
+                    break
+
+    group_sentences: dict[int, list[int]] = {i: [] for i in range(len(groups))}
+    for si, owner in ownership.items():
+        group_sentences[owner].append(si)
+
+    result: list[SentenceGroup] = []
+    for gi, group in enumerate(groups):
+        indices = group_sentences[gi]
+        if indices:
+            result.append(
+                SentenceGroup(
+                    label=group.label,
+                    ranges=tuple(_indices_to_ranges(indices)),
+                )
+            )
+    return result

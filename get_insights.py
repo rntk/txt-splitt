@@ -7,7 +7,7 @@ import sys
 from datetime import datetime
 from html import escape
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 # Add src to path so we can import txt_splitt when running from root
 sys.path.append(str(Path(__file__).parent / "src"))
@@ -15,8 +15,6 @@ sys.path.append(str(Path(__file__).parent / "src"))
 from txt_splitt import (
     CachingLLMCallable,
     LLMCallable,
-    RetryConfig,
-    RetryingLLMCallable,
     SQLiteLLMCacheStore,
     Tracer,
     TracingLLMCallable,
@@ -385,44 +383,24 @@ def run(args: Any) -> None:
     # Set up LLM client
     llm_client = LLamaCPP(host=args.host, model=args.model)
     llm_adapter = LLamaCPPAdapter(llm_client)
-    llm_with_retry: LLMCallable = RetryingLLMCallable(
-        llm_adapter, max_retries=3, backoff_factor=1.0
-    )
 
     tracer: Tracer | None = Tracer() if args.trace else None
     cache_store = build_cache_store(args)
 
     wrapped_llm = wrap_llm(
-        llm_with_retry,
+        llm_adapter,
         namespace="insights",
         args=args,
         tracer=tracer,
         cache_store=cache_store,
     )
 
-    output_mode: Literal["text", "json"] = (
-        "json" if getattr(args, "use_json", False) else "text"
-    )
-    parser_mode: Literal["text", "json", "auto"] = (
-        "json" if output_mode == "json" else "text"
-    )
-    retry_policy = RetryConfig(
-        max_attempts=3,
-        temperature_schedule=[
-            args.temperature + 0.1,
-            args.temperature + 0.3,
-            args.temperature + 0.5,
-        ],
-    )
-
     insight_llm = build_insight_llm(
         wrapped_llm,
         temperature=args.temperature,
         chunker=OverlapChunker(max_chars=args.max_chunk_chars),
-        output_mode=output_mode,
-        retry_policy=retry_policy,
     )
-    parser = InsightParser(input_mode=parser_mode)
+    parser = InsightParser()
 
     print(f"Processing '{args.input_file}'...")
     trace_output: str | None = None
@@ -511,12 +489,6 @@ def main() -> None:
         "--cache-nonzero-temperature",
         action="store_true",
         help="Also cache requests with non-zero temperature",
-    )
-    parser.add_argument(
-        "--json",
-        dest="use_json",
-        action="store_true",
-        help="Use JSON output mode for LLM responses (may improve parsing reliability)",
     )
     args = parser.parse_args()
     run(args)

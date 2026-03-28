@@ -6,10 +6,17 @@ from typing import cast
 
 import pytest
 
-from split_text import build_cache_store, create_pipeline, wrap_async_llm, wrap_sync_llm
+from split_text import (
+    _namespace_for_request,
+    build_cache_store,
+    create_pipeline,
+    wrap_async_llm,
+    wrap_sync_llm,
+)
 from txt_splitt import (
     CachingAsyncLLMCallable,
     CachingLLMCallable,
+    LLMRequest,
     SQLiteLLMCacheStore,
     Tracer,
     TracingAsyncLLMCallable,
@@ -129,3 +136,24 @@ def test_create_pipeline_two_stage_raises_not_implemented(tmp_path: Path) -> Non
             tracer=Tracer(),
             cache_store=build_cache_store(args),
         )
+
+
+def test_namespace_for_request_returns_explicit_namespace() -> None:
+    request = LLMRequest(
+        prompt="prompt",
+        temperature=0.0,
+        metadata={"namespace": "gap-repair"},
+    )
+
+    assert _namespace_for_request(request) == "gap-repair"
+
+
+def test_namespace_for_request_raises_when_missing() -> None:
+    request = LLMRequest(
+        prompt="prompt",
+        temperature=0.0,
+        stage_name="topic_range.coarse",
+    )
+
+    with pytest.raises(ValueError, match="missing a valid namespace"):
+        _namespace_for_request(request)

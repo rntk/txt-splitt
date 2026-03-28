@@ -1,7 +1,5 @@
 """Tests for response parsing."""
 
-from typing import Literal, cast
-
 import pytest
 
 from txt_splitt.errors import ParseError
@@ -12,11 +10,6 @@ from txt_splitt.sentences.types import SentenceRange
 class TestTopicRangeParser:
     def setup_method(self) -> None:
         self.parser = TopicRangeParser()
-
-    def test_invalid_input_mode_raises(self) -> None:
-        invalid_mode = cast(Literal["text", "json", "auto"], "yaml")
-        with pytest.raises(ValueError, match="input_mode must be"):
-            TopicRangeParser(input_mode=invalid_mode)
 
     def test_single_topic_single_range(self) -> None:
         response = "Technology>AI>GPT-4: 0-5"
@@ -162,65 +155,6 @@ class TestTopicRangeParser:
         assert result[0].label == ("Technology", "Database", "PostgreSQL")
         assert result[0].ranges == (SentenceRange(start=0, end=5),)
 
-    def test_json_mode_single_document(self) -> None:
-        parser = TopicRangeParser(input_mode="json")
-        response = (
-            '{"topics":['
-            '{"label":["Technology","AI","GPT-4"],"ranges":[{"start":0,"end":2}]},'
-            '{"label":["Science","Climate"],"ranges":[{"start":3,"end":5}]}'
-            "]}"
-        )
-        result = parser.parse(response, sentence_count=6)
-
-        assert len(result) == 2
-        assert result[0].label == ("Technology", "AI", "GPT-4")
-        assert result[0].ranges == (SentenceRange(start=0, end=2),)
-        assert result[1].label == ("Science", "Climate")
-        assert result[1].ranges == (SentenceRange(start=3, end=5),)
-
-    def test_json_mode_parses_newline_delimited_documents(self) -> None:
-        parser = TopicRangeParser(input_mode="json")
-        response = (
-            '{"topics":[{"label":["Technology","AI"],"ranges":[{"start":0,"end":1}]}]}\n'
-            '{"topics":[{"label":["Technology","AI"],"ranges":[{"start":2,"end":3}]},'
-            '{"label":["Science","Climate"],"ranges":[{"start":4,"end":5}]}]}'
-        )
-        result = parser.parse(response, sentence_count=6)
-
-        assert len(result) == 2
-        assert result[0].label == ("Technology", "AI")
-        assert result[0].ranges == (SentenceRange(start=0, end=3),)
-        assert result[1].label == ("Science", "Climate")
-        assert result[1].ranges == (SentenceRange(start=4, end=5),)
-
-    def test_json_mode_parses_array_of_documents(self) -> None:
-        parser = TopicRangeParser(input_mode="json")
-        response = (
-            '[{"topics":[{"label":["Technology","AI"],"ranges":[{"start":0,"end":1}]}]},'
-            '{"topics":[{"label":["Science","Climate"],"ranges":[{"start":2,"end":3}]}]}]'
-        )
-        result = parser.parse(response, sentence_count=4)
-
-        assert len(result) == 2
-        assert result[0].label == ("Technology", "AI")
-        assert result[1].label == ("Science", "Climate")
-
-    def test_json_mode_invalid_json_raises(self) -> None:
-        parser = TopicRangeParser(input_mode="json")
-        with pytest.raises(ParseError, match="Invalid JSON response"):
-            parser.parse('{"topics":[', sentence_count=3)
-
-    def test_auto_mode_prefers_json(self) -> None:
-        parser = TopicRangeParser(input_mode="auto")
-        response = (
-            '{"topics":[{"label":["Technology","AI"],"ranges":[{"start":0,"end":2}]}]}'
-        )
-        result = parser.parse(response, sentence_count=3)
-
-        assert len(result) == 1
-        assert result[0].label == ("Technology", "AI")
-        assert result[0].ranges == (SentenceRange(start=0, end=2),)
-
     def test_colon_in_topic_name_single_range(self) -> None:
         response = "Technology>Hardware>Apple: Mac Mini production: 6-20"
         result = self.parser.parse(response, sentence_count=25)
@@ -263,10 +197,3 @@ class TestTopicRangeParser:
         assert len(result) == 1
         assert result[0].label == ("Technology", "Cloud", "AWS", "Security", "IAM")
         assert result[0].ranges == (SentenceRange(start=1, end=2),)
-
-    def test_auto_mode_falls_back_to_text(self) -> None:
-        parser = TopicRangeParser(input_mode="auto")
-        result = parser.parse("Technology>AI: 0-2", sentence_count=3)
-
-        assert len(result) == 1
-        assert result[0].label == ("Technology", "AI")

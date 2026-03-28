@@ -21,11 +21,13 @@ from txt_splitt.errors import (
     SentenceSplitError,
     SplitterError,
 )
-from txt_splitt.pipeline import Pipeline, PipelineState
+from txt_splitt.pipeline import Pipeline, PipelineSession, PipelineState
 from txt_splitt.protocols import (
     AsyncLLMCallable,
     HtmlCleaner,
     LLMCallable,
+    LLMRequest,
+    LLMResponse,
     OffsetRestorer,
 )
 from txt_splitt.retry import RetryConfig, RetryingLLMCallable
@@ -53,6 +55,8 @@ __all__ = [
     "LLMCallable",
     "LLMCacheStore",
     "LLMError",
+    "LLMRequest",
+    "LLMResponse",
     "MarkerError",
     "MemoryLLMCacheStore",
     "NoOpSpan",
@@ -62,6 +66,7 @@ __all__ = [
     "OffsetSegment",
     "ParseError",
     "Pipeline",
+    "PipelineSession",
     "PipelineState",
     "RetryConfig",
     "RetryingLLMCallable",
