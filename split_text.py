@@ -695,7 +695,7 @@ def execute_session_sync(
     clients: dict[str, LLMCallable],
 ) -> Any:
     session = pipeline.start(text)
-    with ThreadPool(processes=2) as pool:
+    with ThreadPool(processes=4) as pool:
         while not session.is_complete():
             requests = session.pending_requests()
             responses = pool.map(
