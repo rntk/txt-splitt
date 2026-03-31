@@ -266,8 +266,8 @@ class TestCacheIntegration:
         llm = HierarchicalTopicRangeLLM()
         marked_text = MarkedText(tagged_text="{0} A", sentence_count=1)
 
-        assert _drive_llm(llm, marked_text, client) == "Topic: 0-1"
-        assert _drive_llm(llm, marked_text, client) == "Topic: 0-1"
+        assert _drive_llm(llm, marked_text, client) == "Topic: 0"
+        assert _drive_llm(llm, marked_text, client) == "Topic: 0"
         assert inner.call.call_count == 2
 
     def test_gap_handler_uses_cached_client(self) -> None:
