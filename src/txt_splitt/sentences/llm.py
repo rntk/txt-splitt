@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -19,8 +20,87 @@ from txt_splitt.sentences.types import MarkedText, SentenceGroup, SentenceRange
 if TYPE_CHECKING:
     from txt_splitt.sentences.protocols import MarkedTextChunker
 
+_logger = logging.getLogger(__name__)
 
 _MARKER_ID_RE: re.Pattern[str] = re.compile(r"^\{(\d+)\}")
+
+_MIN_REFINE_FAST_PATH_THRESHOLD = 15
+
+
+@dataclass(frozen=True, slots=True)
+class _MarkerLine:
+    """A single line from tagged text associated with a marker ID."""
+
+    marker_id: int
+    text: str
+
+
+class _MarkerIndex:
+    """Pre-parsed index of tagged text for efficient marker lookups.
+
+    Avoids repeated ``tagged_text.split("\\n")`` scans by parsing once
+    and providing O(1) marker-to-line lookups.
+    """
+
+    __slots__ = ("_lines", "_marker_to_line_indices", "_all_lines")
+
+    def __init__(self, tagged_text: str) -> None:
+        self._all_lines = tagged_text.split("\n")
+        self._lines: list[_MarkerLine] = []
+        self._marker_to_line_indices: dict[int, list[int]] = {}
+        current_marker = -1
+        for line_idx, line in enumerate(self._all_lines):
+            m = _MARKER_ID_RE.match(line)
+            if m:
+                current_marker = int(m.group(1))
+            if current_marker >= 0:
+                ml = _MarkerLine(marker_id=current_marker, text=line)
+                self._lines.append(ml)
+                self._marker_to_line_indices.setdefault(current_marker, []).append(
+                    line_idx
+                )
+
+    def extract_by_ranges(self, ranges: list[SentenceRange]) -> str:
+        if not ranges:
+            return ""
+        allowed = self._allowed_set(ranges)
+        return "\n".join(ml.text for ml in self._lines if ml.marker_id in allowed)
+
+    def extract_with_context(
+        self, ranges: list[SentenceRange], context_markers: int = 5
+    ) -> tuple[str, int, int]:
+        if not ranges:
+            return "", 0, 0
+        range_start = min(r.start for r in ranges)
+        range_end = max(r.end for r in ranges)
+        ctx_start = max(0, range_start - context_markers)
+        ctx_end = range_end + context_markers
+        ctx_ranges = [SentenceRange(start=ctx_start, end=ctx_end)]
+        return self.extract_by_ranges(ctx_ranges), ctx_start, ctx_end
+
+    def count_content_chars(self, ranges: list[SentenceRange]) -> int:
+        if not ranges:
+            return 0
+        allowed = self._allowed_set(ranges)
+        total = 0
+        current_allowed = False
+        for line in self._all_lines:
+            match = _MARKER_ID_RE.match(line)
+            if match:
+                current_allowed = int(match.group(1)) in allowed
+                if current_allowed:
+                    total += len(line[match.end() :].lstrip())
+                continue
+            if current_allowed:
+                total += len(line)
+        return total
+
+    @staticmethod
+    def _allowed_set(ranges: list[SentenceRange]) -> set[int]:
+        allowed: set[int] = set()
+        for r in ranges:
+            allowed.update(range(r.start, r.end + 1))
+        return allowed
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,14 +174,24 @@ def _extract_lines_with_context(
     return "\n".join(selected), ctx_start, ctx_end
 
 
-def _build_coarse_topic_ranges_prompt(tagged_text: str) -> str:
+def _build_coarse_topic_ranges_prompt(
+    tagged_text: str, *, sentence_count: int = 0
+) -> str:
+    if sentence_count > 0:
+        lo = max(2, sentence_count // 20)
+        hi = max(lo + 1, min(15, sentence_count // 5))
+        section_hint = f"Aim for {lo}-{hi} sections unless the document clearly needs fewer or more."
+    else:
+        section_hint = (
+            "Aim for 3-8 sections unless the document clearly needs fewer or more."
+        )
     return f"""Analyze the text inside <content>.
 
 A new sentence starts only on lines that begin with {{N}}. Wrapped lines without a marker belong to the same sentence. Newlines between marker lines are formatting separators — do NOT treat every newline as a topic boundary.
 
 The input may be a chunk; marker IDs might not start at 0. Always use the exact marker IDs shown in <content>.
 
-Split the document into a small number of broad content sections. Your goal is to chunk the text by major topic shifts so each chunk can be analyzed in detail independently. Aim for 3-8 sections unless the document clearly needs fewer or more.
+Split the document into a small number of broad content sections. Your goal is to chunk the text by major topic shifts so each chunk can be analyzed in detail independently. {section_hint}
 
 Rules:
 1. Identify major topic shifts across the whole document before assigning any boundaries.
@@ -133,7 +223,6 @@ def _build_refine_subtopics_prompt(
     *,
     assign_ranges: tuple[SentenceRange, ...] | None = None,
 ) -> str:
-    del parent_topic
     context_note = ""
     if assign_ranges:
         context_note = (
@@ -141,6 +230,9 @@ def _build_refine_subtopics_prompt(
             f"{_format_ranges(assign_ranges)}. "
             "Surrounding markers are shown for context only — do NOT include markers outside those ranges in your output.\n"
         )
+    domain_hint = ""
+    if parent_topic:
+        domain_hint = f"\nDomain context (for your understanding only — do NOT copy these words into your labels): {parent_topic}\n"
     return f"""Identify the important topics within the text section inside <content>. Only split into multiple subtopics when the section contains genuinely different subjects. If the section is cohesive around one theme, output exactly 1 topic covering all markers.
 
 A new sentence starts only on lines that begin with {{N}}. Wrapped lines without a marker belong to the same sentence. Newlines between marker lines are formatting separators — do NOT treat every newline as a topic boundary.
@@ -166,7 +258,7 @@ Pacific Coral Bleaching: 12-16
 Carbon Market Expansion: 17-22
 
 {context_note}
-
+{domain_hint}
 <content>
 {tagged_text}
 </content>
@@ -217,13 +309,19 @@ class HierarchicalTopicRangeLLM:
         temperature: float = 0.0,
         chunker: "MarkedTextChunker | None" = None,
         max_response_chars: int = 50_000,
+        max_prompt_chars: int = 0,
         min_refine_sentences: int = 5,
         min_refine_chars: int = 400,
+        context_markers: int = 0,
+        single_stage_threshold: int = _MIN_REFINE_FAST_PATH_THRESHOLD,
         coarse_prompt_builder: Callable[[str], str] | None = None,
         refine_prompt_builder: Callable[[str, str], str] | None = None,
     ) -> None:
         if max_response_chars <= 0:
             msg = "max_response_chars must be > 0"
+            raise ValueError(msg)
+        if max_prompt_chars < 0:
+            msg = "max_prompt_chars must be >= 0"
             raise ValueError(msg)
         if min_refine_sentences <= 0:
             msg = "min_refine_sentences must be > 0"
@@ -231,18 +329,38 @@ class HierarchicalTopicRangeLLM:
         if min_refine_chars <= 0:
             msg = "min_refine_chars must be > 0"
             raise ValueError(msg)
+        if context_markers < 0:
+            msg = "context_markers must be >= 0"
+            raise ValueError(msg)
+        if single_stage_threshold < 0:
+            msg = "single_stage_threshold must be >= 0"
+            raise ValueError(msg)
         self._temperature = temperature
         self._chunker = chunker
         self._max_response_chars = max_response_chars
+        self._max_prompt_chars = max_prompt_chars
         self._min_refine_sentences = min_refine_sentences
         self._min_refine_chars = min_refine_chars
+        self._context_markers = context_markers
+        self._single_stage_threshold = single_stage_threshold
         self._coarse_prompt_builder = coarse_prompt_builder
         self._refine_prompt_builder = refine_prompt_builder
 
     response_format: str = "text"
 
     def plan_query(self, marked_text: MarkedText) -> StageResult[str]:
-        """Emit coarse requests, then refine requests, then final text."""
+        """Emit coarse requests, then refine requests, then final text.
+
+        For very short documents (sentence count below *single_stage_threshold*),
+        only the refine prompt is sent, skipping the coarse stage entirely.
+        """
+        if (
+            self._single_stage_threshold > 0
+            and marked_text.sentence_count <= self._single_stage_threshold
+            and self._chunker is None
+        ):
+            return self._plan_single_stage(marked_text)
+
         chunks = (
             self._chunker.chunk(marked_text)
             if self._chunker is not None
@@ -253,7 +371,10 @@ class HierarchicalTopicRangeLLM:
                 prompt=(
                     self._coarse_prompt_builder(chunk.tagged_text)
                     if self._coarse_prompt_builder is not None
-                    else _build_coarse_topic_ranges_prompt(chunk.tagged_text)
+                    else _build_coarse_topic_ranges_prompt(
+                        chunk.tagged_text,
+                        sentence_count=marked_text.sentence_count,
+                    )
                 ),
                 temperature=self._temperature,
                 response_format=self.response_format,
@@ -266,6 +387,50 @@ class HierarchicalTopicRangeLLM:
             requests=coarse_requests,
             resume=lambda responses: self._resume_coarse(marked_text, responses),
         )
+
+    def _plan_single_stage(self, marked_text: MarkedText) -> StageResult[str]:
+        """Fast path for short documents — skip coarse, go straight to refine."""
+        full_range = SentenceRange(start=0, end=marked_text.sentence_count - 1)
+        prompt = (
+            self._refine_prompt_builder(marked_text.tagged_text, "")
+            if self._refine_prompt_builder is not None
+            else _build_refine_subtopics_prompt(
+                marked_text.tagged_text,
+                "",
+                assign_ranges=(full_range,),
+            )
+        )
+        request = LLMRequest(
+            prompt=prompt,
+            temperature=self._temperature,
+            response_format=self.response_format,
+            stage_name="topic_range.refine",
+            metadata={"namespace": "topic-range"},
+        )
+        return PendingStage(
+            requests=(request,),
+            resume=lambda responses: CompletedStage(
+                self._parse_single_stage(responses, marked_text.sentence_count)
+            ),
+        )
+
+    def _parse_single_stage(
+        self, responses: list[LLMResponse], sentence_count: int
+    ) -> str:
+        content = _validate_response(
+            responses[0].content,
+            max_response_chars=self._max_response_chars,
+        )
+        parser = TopicRangeParser()
+        try:
+            groups = parser.parse(content, sentence_count)
+        except ParseError as e:
+            raise LLMError(f"Failed to parse single-stage LLM response: {e}") from e
+        lines: list[str] = []
+        for group in groups:
+            label = ">".join(group.label)
+            lines.append(f"{label}: {_format_ranges(list(group.ranges))}")
+        return "\n".join(lines)
 
     def _resume_coarse(
         self,
@@ -299,45 +464,58 @@ class HierarchicalTopicRangeLLM:
         sentence_count: int,
         coarse_groups: list[SentenceGroup],
     ) -> StageResult[str]:
+        index = _MarkerIndex(tagged_text)
         batches = _merge_small_refine_batches(
-            _build_refine_batches(tagged_text, coarse_groups),
+            _build_refine_batches(index, coarse_groups),
             min_refine_sentences=self._min_refine_sentences,
             min_refine_chars=self._min_refine_chars,
         )
+        ctx = self._context_markers if self._context_markers > 0 else 5
         requests: list[LLMRequest] = []
+        active_batches: list[_RefineBatch] = []
         for batch in batches:
             ranges = list(batch.assign_ranges)
-            subset, _ctx_start, _ctx_end = _extract_lines_with_context(
-                tagged_text,
+            subset, _ctx_start, _ctx_end = index.extract_with_context(
                 ranges,
-                context_markers=5,
+                context_markers=ctx,
             )
             if not subset.strip():
                 continue
             parent_hint = _refine_parent_hint(batch)
+            prompt = (
+                self._refine_prompt_builder(subset, parent_hint)
+                if self._refine_prompt_builder is not None
+                else _build_refine_subtopics_prompt(
+                    subset,
+                    parent_hint,
+                    assign_ranges=batch.assign_ranges,
+                )
+            )
+            if self._max_prompt_chars > 0 and len(prompt) > self._max_prompt_chars:
+                _logger.warning(
+                    "Refine prompt exceeds budget (%d > %d chars), "
+                    "falling back to coarse labels for batch %s",
+                    len(prompt),
+                    self._max_prompt_chars,
+                    _format_ranges(batch.assign_ranges),
+                )
+                continue
             requests.append(
                 LLMRequest(
-                    prompt=(
-                        self._refine_prompt_builder(subset, parent_hint)
-                        if self._refine_prompt_builder is not None
-                        else _build_refine_subtopics_prompt(
-                            subset,
-                            parent_hint,
-                            assign_ranges=batch.assign_ranges,
-                        )
-                    ),
+                    prompt=prompt,
                     temperature=self._temperature,
                     response_format=self.response_format,
                     stage_name="topic_range.refine",
                     metadata={"namespace": "topic-range"},
                 )
             )
+            active_batches.append(batch)
         if not requests:
             return CompletedStage("")
         return PendingStage(
             requests=tuple(requests),
             resume=lambda responses: CompletedStage(
-                self._merge_refine_responses(batches, responses, sentence_count)
+                self._merge_refine_responses(active_batches, responses, sentence_count)
             ),
         )
 
@@ -350,51 +528,75 @@ class HierarchicalTopicRangeLLM:
         refined: list[str] = []
         parser = TopicRangeParser()
         for batch, response in zip(batches, responses, strict=True):
-            fine = _validate_response(
-                response.content,
-                max_response_chars=self._max_response_chars,
-            )
-            if not fine:
+            try:
+                fine = _validate_response(
+                    response.content,
+                    max_response_chars=self._max_response_chars,
+                )
+            except LLMError:
+                # Fallback: emit coarse labels for this batch
+                refined.extend(_fallback_coarse_lines(batch))
                 continue
-            parsed_groups = parser.parse(fine, sentence_count)
+            try:
+                parsed_groups = parser.parse(fine, sentence_count)
+            except ParseError:
+                refined.extend(_fallback_coarse_lines(batch))
+                continue
             ordered_labels: list[tuple[str, ...]] = []
             grouped_ranges: dict[tuple[str, ...], list[SentenceRange]] = {}
             for group in parsed_groups:
                 line_parts = list(group.label)
                 for sentence_range in group.ranges:
-                    for parent_parts, owned_range in _split_range_by_ownership(
-                        sentence_range,
-                        batch.owners,
-                    ):
-                        merged = tuple(
-                            _merge_topic_parts(list(parent_parts), line_parts)
-                        )
-                        if merged not in grouped_ranges:
-                            grouped_ranges[merged] = []
-                            ordered_labels.append(merged)
-                        grouped_ranges[merged].append(owned_range)
+                    clamped = _clamp_range_to_assign(
+                        sentence_range, batch.assign_ranges
+                    )
+                    for owned_range in clamped:
+                        for parent_parts, split_range in _split_range_by_ownership(
+                            owned_range,
+                            batch.owners,
+                        ):
+                            merged = tuple(
+                                _merge_topic_parts(list(parent_parts), line_parts)
+                            )
+                            if merged not in grouped_ranges:
+                                grouped_ranges[merged] = []
+                                ordered_labels.append(merged)
+                            grouped_ranges[merged].append(split_range)
             for label in ordered_labels:
                 merged_ranges = _merge_ranges(grouped_ranges[label])
                 refined.append(f"{'>'.join(label)}: {_format_ranges(merged_ranges)}")
-        return "\n".join(refined)
+        # Gap detection: find markers that no refine response covered
+        result = "\n".join(refined)
+        covered = _covered_markers(batches, result)
+        expected: set[int] = set()
+        for batch in batches:
+            for owner in batch.owners:
+                expected.update(
+                    range(owner.sentence_range.start, owner.sentence_range.end + 1)
+                )
+        orphans = sorted(expected - covered)
+        if orphans:
+            _logger.warning("Orphaned markers after refine: %s", orphans)
+            result = _assign_orphans_to_nearest(result, orphans, batches)
+        return result
 
 
 def _build_refine_batches(
-    tagged_text: str,
+    index: _MarkerIndex,
     coarse_groups: list[SentenceGroup],
 ) -> list[_RefineBatch]:
     owners: list[_RefineOwner] = []
     for group in coarse_groups:
         parent_parts = tuple(group.label)
         for sentence_range in group.ranges:
-            if not _extract_lines_by_range(tagged_text, [sentence_range]).strip():
+            if not index.extract_by_ranges([sentence_range]).strip():
                 continue
             owners.append(
                 _RefineOwner(
                     parent_parts=parent_parts,
                     sentence_range=sentence_range,
                     sentence_count=sentence_range.end - sentence_range.start + 1,
-                    char_count=_count_content_chars(tagged_text, [sentence_range]),
+                    char_count=index.count_content_chars([sentence_range]),
                 )
             )
     owners.sort(
@@ -503,6 +705,92 @@ def _split_range_by_ownership(
             )
         )
     return splits
+
+
+def _clamp_range_to_assign(
+    sentence_range: SentenceRange,
+    assign_ranges: tuple[SentenceRange, ...],
+) -> list[SentenceRange]:
+    """Intersect *sentence_range* with the allowed *assign_ranges*.
+
+    Returns zero or more sub-ranges that fall within the assigned region,
+    discarding any portion that extends into context-only markers.
+    """
+    clamped: list[SentenceRange] = []
+    for ar in assign_ranges:
+        overlap_start = max(sentence_range.start, ar.start)
+        overlap_end = min(sentence_range.end, ar.end)
+        if overlap_start <= overlap_end:
+            clamped.append(SentenceRange(start=overlap_start, end=overlap_end))
+    return clamped
+
+
+def _fallback_coarse_lines(batch: _RefineBatch) -> list[str]:
+    """Produce output lines using the coarse parent labels when refinement fails."""
+    lines: list[str] = []
+    for owner in batch.owners:
+        label = ">".join(owner.parent_parts)
+        range_str = _format_ranges([owner.sentence_range])
+        lines.append(f"{label}: {range_str}")
+    return lines
+
+
+def _covered_markers(batches: list[_RefineBatch], result: str) -> set[int]:
+    """Return the set of marker IDs covered by the refined output lines."""
+    covered: set[int] = set()
+    range_re = re.compile(r"(\d+)(?:\s*-\s*(\d+))?")
+    for line in result.splitlines():
+        _, _, range_text = line.partition(":")
+        for m in range_re.finditer(range_text):
+            start = int(m.group(1))
+            end = int(m.group(2)) if m.group(2) else start
+            covered.update(range(start, end + 1))
+    return covered
+
+
+def _assign_orphans_to_nearest(
+    result: str,
+    orphans: list[int],
+    batches: list[_RefineBatch],
+) -> str:
+    """Append orphaned markers to the nearest coarse owner's label."""
+    owner_labels: dict[int, str] = {}
+    owner_boundaries: list[tuple[int, int, str]] = []
+    for batch in batches:
+        for owner in batch.owners:
+            label = ">".join(owner.parent_parts)
+            for marker in range(
+                owner.sentence_range.start, owner.sentence_range.end + 1
+            ):
+                owner_labels[marker] = label
+            owner_boundaries.append(
+                (owner.sentence_range.start, owner.sentence_range.end, label)
+            )
+
+    extra_by_label: dict[str, list[int]] = {}
+    for marker in orphans:
+        found_label: str | None = owner_labels.get(marker)
+        if found_label is None:
+            # Find nearest boundary
+            best_dist = float("inf")
+            best_label = ""
+            for start, end, lbl in owner_boundaries:
+                dist = min(abs(marker - start), abs(marker - end))
+                if dist < best_dist:
+                    best_dist = dist
+                    best_label = lbl
+            found_label = best_label
+        if found_label:
+            extra_by_label.setdefault(found_label, []).append(marker)
+
+    extra_lines: list[str] = []
+    for label, markers in extra_by_label.items():
+        ranges = _merge_ranges([SentenceRange(start=m, end=m) for m in sorted(markers)])
+        extra_lines.append(f"{label}: {_format_ranges(ranges)}")
+
+    if extra_lines:
+        return result + "\n" + "\n".join(extra_lines)
+    return result
 
 
 def _merge_ranges(ranges: list[SentenceRange]) -> list[SentenceRange]:

@@ -108,7 +108,7 @@ class TestHierarchicalTopicRangeLLM:
             "Technology>AI: 0-1",
             "Summary: 0-1",
         ]
-        llm = HierarchicalTopicRangeLLM()
+        llm = HierarchicalTopicRangeLLM(single_stage_threshold=0)
 
         mt = MarkedText(tagged_text="{0} A\n{1} B", sentence_count=2)
         result = _drive_llm(llm, mt, client)
@@ -123,7 +123,7 @@ class TestHierarchicalTopicRangeLLM:
             "Technology>AI: 0",
             "Summary: 0",
         ]
-        llm = HierarchicalTopicRangeLLM()
+        llm = HierarchicalTopicRangeLLM(single_stage_threshold=0)
 
         mt = MarkedText(tagged_text="{0} Text", sentence_count=1)
         _drive_llm(llm, mt, client)
@@ -170,7 +170,9 @@ class TestHierarchicalTopicRangeLLM:
             "{0} AI sentence.\n{1} More AI.\n{2} Finance sentence.\n{3} More finance."
         )
         mt = MarkedText(tagged_text=tagged, sentence_count=4)
-        llm = HierarchicalTopicRangeLLM(min_refine_sentences=1, min_refine_chars=1)
+        llm = HierarchicalTopicRangeLLM(
+            min_refine_sentences=1, min_refine_chars=1, single_stage_threshold=0
+        )
         _drive_llm(llm, mt, client)
 
         # Second call (first stage-2) must contain markers 0-1 and nearby context
@@ -186,8 +188,8 @@ class TestHierarchicalTopicRangeLLM:
         assert "{3}" in third_prompt
         assert "Only assign markers in these ranges: 2-3" in third_prompt
 
-    def test_stage2_prompt_omits_parent_topic(self) -> None:
-        """Refinement prompt should not inject coarse parent labels."""
+    def test_stage2_prompt_includes_domain_hint(self) -> None:
+        """Refinement prompt includes a domain context hint but not as a label instruction."""
         coarse_response = "Technology>AI: 0-49"
         client = MagicMock()
         client.call.side_effect = [
@@ -200,7 +202,9 @@ class TestHierarchicalTopicRangeLLM:
         _drive_llm(llm, mt, client)
 
         refine_prompt = client.call.call_args_list[1][0][0]
-        assert "Technology>AI" not in refine_prompt
+        assert "Domain context" in refine_prompt
+        assert "Technology>AI" in refine_prompt
+        assert "do NOT copy these words into your labels" in refine_prompt
         assert "Parent Topic" not in refine_prompt
 
     def test_stage2_text_can_choose_new_hierarchy(self) -> None:
@@ -230,7 +234,9 @@ class TestHierarchicalTopicRangeLLM:
 
         tagged = "{0} AI sentence only."
         mt = MarkedText(tagged_text=tagged, sentence_count=11)
-        llm = HierarchicalTopicRangeLLM(min_refine_sentences=1, min_refine_chars=1)
+        llm = HierarchicalTopicRangeLLM(
+            min_refine_sentences=1, min_refine_chars=1, single_stage_threshold=0
+        )
         result = _drive_llm(llm, mt, client)
 
         assert "Technology>AI>LLMs: 0" in result
@@ -327,7 +333,8 @@ class TestHierarchicalTopicRangeLLM:
 
         assert "When in doubt, merge rather than fragmenting." in refine_prompt
         assert "output 1-4 subtopics" in refine_prompt
-        assert "Parent Topic" not in refine_prompt
+        assert "Domain context" in refine_prompt
+        assert "do NOT copy these words into your labels" in refine_prompt
 
     def test_refine_prompt_blocks_lightweight_standalone_topics(self) -> None:
         """Refine prompt forbids standalone title/CTA/footer fragments."""
@@ -413,7 +420,7 @@ class TestHierarchicalTopicRangeLLM:
         lines.append(f"{{4}} {' '.join(['bridge'] * 30)}.")
         lines.extend(f"{{{i}}} {' '.join(['orbit'] * 30)}." for i in range(5, 13))
         mt = MarkedText(tagged_text="\n".join(lines), sentence_count=13)
-        llm = HierarchicalTopicRangeLLM()
+        llm = HierarchicalTopicRangeLLM(single_stage_threshold=0)
         result = _drive_llm(llm, mt, client)
 
         assert client.call.call_count == 3
@@ -437,7 +444,7 @@ class TestHierarchicalTopicRangeLLM:
             f"{{{i}}} {' '.join(['finance'] * 50)}." for i in range(5, 10)
         ]
         mt = MarkedText(tagged_text="\n".join(lines), sentence_count=10)
-        llm = HierarchicalTopicRangeLLM()
+        llm = HierarchicalTopicRangeLLM(single_stage_threshold=0)
         result = _drive_llm(llm, mt, client)
 
         assert client.call.call_count == 2
@@ -455,7 +462,7 @@ class TestHierarchicalTopicRangeLLM:
         ]
 
         mt = self._make_repeated_marked_text([4, 5])
-        llm = HierarchicalTopicRangeLLM()
+        llm = HierarchicalTopicRangeLLM(single_stage_threshold=0)
         result = _drive_llm(llm, mt, client)
 
         assert client.call.call_count == 2
@@ -478,8 +485,198 @@ class TestHierarchicalTopicRangeLLM:
             return "custom refine prompt"
 
         mt = self._make_repeated_marked_text([4, 5])
-        llm = HierarchicalTopicRangeLLM(refine_prompt_builder=custom_refine)
+        llm = HierarchicalTopicRangeLLM(
+            refine_prompt_builder=custom_refine, single_stage_threshold=0
+        )
         _drive_llm(llm, mt, client)
 
         assert len(refine_calls) == 1
         assert refine_calls[0][1] == ""
+
+    # -- Single-stage fast path -------------------------------------------------
+
+    def test_single_stage_fast_path_for_short_doc(self) -> None:
+        """Documents under single_stage_threshold skip the coarse stage."""
+        client = MagicMock()
+        client.call.side_effect = ["Topic A: 0-2\nTopic B: 3-4"]
+
+        mt = MarkedText(
+            tagged_text="\n".join(f"{{{i}}} Sentence {i}." for i in range(5)),
+            sentence_count=5,
+        )
+        llm = HierarchicalTopicRangeLLM()
+        result = _drive_llm(llm, mt, client)
+
+        assert client.call.call_count == 1  # only one LLM call
+        prompt = client.call.call_args_list[0][0][0]
+        assert (
+            "Split the document into a small number" not in prompt
+        )  # no coarse prompt
+        assert "Topic A: 0-2" in result
+        assert "Topic B: 3-4" in result
+
+    def test_single_stage_disabled_with_threshold_zero(self) -> None:
+        """Setting single_stage_threshold=0 forces two-stage even for tiny docs."""
+        client = MagicMock()
+        client.call.side_effect = ["Topic: 0-1", "Refined: 0-1"]
+
+        mt = MarkedText(tagged_text="{0} A\n{1} B", sentence_count=2)
+        llm = HierarchicalTopicRangeLLM(single_stage_threshold=0)
+        _drive_llm(llm, mt, client)
+
+        assert client.call.call_count == 2
+
+    def test_single_stage_not_used_with_chunker(self) -> None:
+        """Even short docs go two-stage when a chunker is provided."""
+        client = MagicMock()
+        client.call.side_effect = ["Topic: 0-1", "Refined: 0-1"]
+
+        mt = MarkedText(tagged_text="{0} A\n{1} B", sentence_count=2)
+        chunker = MagicMock()
+        chunker.chunk.return_value = [mt]
+        llm = HierarchicalTopicRangeLLM(chunker=chunker)
+        _drive_llm(llm, mt, client)
+
+        assert client.call.call_count == 2
+
+    # -- Refine error handling (graceful fallback) ------------------------------
+
+    def test_refine_parse_error_falls_back_to_coarse_labels(self) -> None:
+        """When a refine response is unparseable, coarse labels are used."""
+        coarse_response = "Technology>AI: 0-49\nBusiness>Finance: 50-99"
+        client = MagicMock()
+        client.call.side_effect = [
+            coarse_response,
+            "not a valid response <<<>>>",  # unparseable
+            "Stocks: 50-74\nBonds: 75-99",
+        ]
+
+        mt = self._make_large_marked_text(100)
+        llm = HierarchicalTopicRangeLLM()
+        result = _drive_llm(llm, mt, client)
+
+        assert "Technology>AI: 0-49" in result  # fallback
+        assert "Business>Finance>Stocks: 50-74" in result
+        assert "Business>Finance>Bonds: 75-99" in result
+
+    def test_refine_empty_response_falls_back_to_coarse_labels(self) -> None:
+        """When a refine response is empty, coarse labels are used."""
+        coarse_response = "Technology>AI: 0-49\nBusiness>Finance: 50-99"
+        client = MagicMock()
+        client.call.side_effect = [
+            coarse_response,
+            "",  # empty — triggers LLMError
+            "Stocks: 50-99",
+        ]
+
+        mt = self._make_large_marked_text(100)
+        llm = HierarchicalTopicRangeLLM()
+        result = _drive_llm(llm, mt, client)
+
+        assert "Technology>AI: 0-49" in result  # fallback
+        assert "Business>Finance>Stocks: 50-99" in result
+
+    # -- Range clamping (#2) ---------------------------------------------------
+
+    def test_refine_ranges_clamped_to_assign_ranges(self) -> None:
+        """Refine output that extends into context markers is clamped."""
+        coarse_response = "Technology>AI: 0-4\nBusiness>Finance: 5-9"
+        client = MagicMock()
+        client.call.side_effect = [
+            coarse_response,
+            # LLM returns range 3-6 which spans into context
+            "Overlap: 3-6\nStuff: 0-2",
+            "More: 5-9",
+        ]
+
+        lines = [f"{{{i}}} {' '.join(['word'] * 30)}." for i in range(10)]
+        mt = MarkedText(tagged_text="\n".join(lines), sentence_count=10)
+        llm = HierarchicalTopicRangeLLM(
+            min_refine_sentences=1, min_refine_chars=1, single_stage_threshold=0
+        )
+        result = _drive_llm(llm, mt, client)
+
+        # The first batch assigns 0-4; range "3-6" should be clamped to 3-4
+        assert "Technology>AI>Overlap: 3-4" in result
+        assert "Technology>AI>Stuff: 0-2" in result
+        assert "Business>Finance>More: 5-9" in result
+
+    # -- Dynamic section count (#5) -------------------------------------------
+
+    def test_coarse_prompt_dynamic_section_count(self) -> None:
+        """Coarse prompt adjusts section guidance based on sentence_count."""
+        prompt_small = _build_coarse_topic_ranges_prompt("{0} text", sentence_count=10)
+        prompt_large = _build_coarse_topic_ranges_prompt("{0} text", sentence_count=200)
+        prompt_default = _build_coarse_topic_ranges_prompt("{0} text")
+
+        # Small doc: lower range
+        assert "Aim for" in prompt_small
+        # Large doc: higher range
+        assert "Aim for" in prompt_large
+        # Default (no count): 3-8
+        assert "3-8 sections" in prompt_default
+
+    # -- Domain context hint (#4) ---------------------------------------------
+
+    def test_refine_prompt_domain_hint_present(self) -> None:
+        """When parent_topic is set, domain context appears in refine prompt."""
+        prompt = _build_refine_subtopics_prompt("{0} text", "Science>Biology")
+        assert "Domain context" in prompt
+        assert "Science>Biology" in prompt
+        assert "do NOT copy these words into your labels" in prompt
+
+    def test_refine_prompt_no_domain_hint_when_empty(self) -> None:
+        """When parent_topic is empty, no domain hint is injected."""
+        prompt = _build_refine_subtopics_prompt("{0} text", "")
+        assert "Domain context" not in prompt
+
+    # -- Configurable context_markers (#3) ------------------------------------
+
+    def test_configurable_context_markers(self) -> None:
+        """Custom context_markers value is used in refine prompts."""
+        coarse_response = "Technology>AI: 5-10"
+        client = MagicMock()
+        client.call.side_effect = [coarse_response, "LLMs: 5-10"]
+
+        lines = [f"{{{i}}} Sentence {i}." for i in range(20)]
+        mt = MarkedText(tagged_text="\n".join(lines), sentence_count=20)
+
+        # With large context, more surrounding markers appear
+        llm = HierarchicalTopicRangeLLM(context_markers=10)
+        _drive_llm(llm, mt, client)
+
+        refine_prompt = client.call.call_args_list[1][0][0]
+        # With context_markers=10, marker {0} should appear (5-10=max(0,-5)=0)
+        assert "{0}" in refine_prompt
+
+    # -- Prompt size budget (#13) ---------------------------------------------
+
+    def test_max_prompt_chars_skips_oversized_batch(self) -> None:
+        """Batches whose refine prompt exceeds max_prompt_chars are skipped."""
+        coarse_response = "Technology>AI: 0-49\nBusiness>Finance: 50-99"
+        client = MagicMock()
+        client.call.side_effect = [
+            coarse_response,
+            "Stocks: 50-99",
+        ]
+
+        mt = self._make_large_marked_text(100)
+        # Set a very small budget — first batch prompt will be too large
+        llm = HierarchicalTopicRangeLLM(max_prompt_chars=100)
+        _drive_llm(llm, mt, client)
+
+        # Both prompts exceed the tiny budget, so all batches fall through
+        # to the empty-requests path. The client is only called for coarse.
+        assert client.call.call_count == 1  # only the coarse call
+
+    def test_invalid_max_prompt_chars_raises(self) -> None:
+        with pytest.raises(ValueError, match="max_prompt_chars must be >= 0"):
+            HierarchicalTopicRangeLLM(max_prompt_chars=-1)
+
+    def test_invalid_context_markers_raises(self) -> None:
+        with pytest.raises(ValueError, match="context_markers must be >= 0"):
+            HierarchicalTopicRangeLLM(context_markers=-1)
+
+    def test_invalid_single_stage_threshold_raises(self) -> None:
+        with pytest.raises(ValueError, match="single_stage_threshold must be >= 0"):
+            HierarchicalTopicRangeLLM(single_stage_threshold=-1)

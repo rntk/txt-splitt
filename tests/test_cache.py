@@ -268,7 +268,7 @@ class TestCacheIntegration:
 
         assert _drive_llm(llm, marked_text, client) == "Topic: 0"
         assert _drive_llm(llm, marked_text, client) == "Topic: 0"
-        assert inner.call.call_count == 2
+        assert inner.call.call_count == 1  # single-stage; second run uses cache
 
     def test_gap_handler_uses_cached_client(self) -> None:
         inner = MagicMock()
