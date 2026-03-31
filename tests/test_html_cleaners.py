@@ -1,9 +1,18 @@
 """Tests for HTML tag cleaning and offset mapping."""
 
+from __future__ import annotations
+
+from typing import TypeAlias
+
 import pytest
 
 from txt_splitt.html_cleaners import HTMLParserTagStripCleaner, TagStripCleaner
 from txt_splitt.types import OffsetMapping, OffsetSegment
+
+# ---------------------------------------------------------------------------
+# Type alias for cleaner instances used in shared mixin tests
+# ---------------------------------------------------------------------------
+_Cleaner: TypeAlias = TagStripCleaner | HTMLParserTagStripCleaner
 
 
 class TestTagStripCleaner:
@@ -303,3 +312,176 @@ class TestHTMLParserTagStripCleanerStripTags(_StripTagsMixin):
         text = "X<script>bad<p>Y</p>"
         clean, _ = c.clean(text)
         assert clean == "X"
+
+
+# ---------------------------------------------------------------------------
+# Shared mixin: nested HTML position-mapping tests
+# ---------------------------------------------------------------------------
+
+
+class _NestedHTMLMixin:
+    """Position-mapping tests for multi-level nested HTML.
+
+    Run for both ``TagStripCleaner`` and ``HTMLParserTagStripCleaner`` via the
+    concrete subclasses below.
+    """
+
+    def _make_cleaner(self) -> _Cleaner:
+        raise NotImplementedError
+
+    # -- 3 levels deep, single text node ------------------------------------
+
+    def test_three_level_deep_nesting_single_text(self) -> None:
+        """All opening tags and all closing tags are adjacent → each group
+        merges into one removed span, leaving a single mapping segment."""
+        # <div><p><b> at [0:11], "Hello world" at [11:22], </b></p></div> at [22:36]
+        html = "<div><p><b>Hello world</b></p></div>"
+        c = self._make_cleaner()
+        clean, mapping = c.clean(html)
+
+        assert clean == "Hello world"
+        assert len(mapping.segments) == 1
+        assert mapping.segments[0] == OffsetSegment(
+            clean_offset=0, original_offset=11, length=11
+        )
+        assert mapping.original_length == 36
+        assert mapping.clean_length == 11
+
+        # Every character maps directly into the original text node
+        for i in range(11):
+            assert mapping.to_original(i) == 11 + i, f"position {i}"
+        assert mapping.to_original(11) == 36  # end → original_length
+
+    # -- text nodes interleaved with tags at multiple nesting levels ---------
+
+    def test_text_at_multiple_nesting_levels_no_spaces(self) -> None:
+        """Text at the outer and inner div level; no natural whitespace means
+        synthetic separators are injected between each text run."""
+        # <div> at [0:5], "Outer" at [5:10], <p> at [10:13], "Inner" at [13:18],
+        # </p> at [18:22], "End" at [22:25], </div> at [25:31]
+        html = "<div>Outer<p>Inner</p>End</div>"
+        c = self._make_cleaner()
+        clean, mapping = c.clean(html)
+
+        assert clean == "Outer Inner End"
+        assert mapping.original_length == len(html)
+        assert mapping.clean_length == len(clean)
+
+        # Precomputed expected original positions for each clean position
+        expected = [5, 6, 7, 8, 9, 10, 13, 14, 15, 16, 17, 18, 22, 23, 24, 31]
+        for i, orig in enumerate(expected):
+            assert mapping.to_original(i) == orig, (
+                f"clean pos {i}: expected orig {orig}, got {mapping.to_original(i)}"
+            )
+
+        # Non-space clean characters must map to the matching character in HTML
+        for i in range(len(clean)):
+            if clean[i] != " ":
+                orig = mapping.to_original(i)
+                assert html[orig] == clean[i], (
+                    f"char mismatch at clean[{i}]={clean[i]!r}, "
+                    f"html[{orig}]={html[orig]!r}"
+                )
+
+    # -- adjacent closing + opening tags (paragraph boundary) ---------------
+
+    def test_two_paragraphs_every_position(self) -> None:
+        """</p><p> boundary: adjacent tags merge into one removed span;
+        a synthetic separator is inserted between the two text runs."""
+        # <p> at [0:3], "First." at [3:9], </p><p> merged at [9:16],
+        # "Second." at [16:23], </p> at [23:27]
+        html = "<p>First.</p><p>Second.</p>"
+        c = self._make_cleaner()
+        clean, mapping = c.clean(html)
+
+        assert clean == "First. Second."
+        assert mapping.original_length == len(html)  # 27
+        assert mapping.clean_length == len(clean)  # 14
+
+        # Every position — including synthetic separator at clean[6] → orig[9]
+        expected = [3, 4, 5, 6, 7, 8, 9, 16, 17, 18, 19, 20, 21, 22, 27]
+        for i, orig in enumerate(expected):
+            assert mapping.to_original(i) == orig, (
+                f"clean pos {i}: expected {orig}, got {mapping.to_original(i)}"
+            )
+
+    # -- multiple self-closing tags -----------------------------------------
+
+    def test_multiple_br_tags_every_position(self) -> None:
+        """Two <br/> tags each produce a synthetic separator; text runs 'A',
+        'B', 'C' remain individually addressable."""
+        # "A" at [0:1], <br/> at [1:6], "B" at [6:7], <br/> at [7:12], "C" at [12:13]
+        html = "A<br/>B<br/>C"
+        c = self._make_cleaner()
+        clean, mapping = c.clean(html)
+
+        assert clean == "A B C"
+        assert mapping.original_length == len(html)  # 13
+        assert mapping.clean_length == len(clean)  # 5
+
+        expected = [0, 1, 6, 7, 12, 13]
+        for i, orig in enumerate(expected):
+            assert mapping.to_original(i) == orig, (
+                f"clean pos {i}: expected {orig}, got {mapping.to_original(i)}"
+            )
+
+    # -- deep nesting followed by sibling text node -------------------------
+
+    def test_deep_nesting_plus_tail_text(self) -> None:
+        """Three closing tags are adjacent and merge; the tail text ' tail' is
+        separated from the inner text 'Deep' by a synthetic separator."""
+        # <div><section><p> merged at [0:17], "Deep" at [17:21],
+        # </p></section></div> merged at [21:41], " tail" at [41:46]
+        html = "<div><section><p>Deep</p></section></div> tail"
+        c = self._make_cleaner()
+        clean, mapping = c.clean(html)
+
+        assert clean == "Deep tail"
+        assert mapping.original_length == len(html)  # 46
+        assert mapping.clean_length == len(clean)  # 9
+
+        # "Deep" → [17:21], synthetic space → 41 (start of " tail" run / end of
+        # closing-tags block), " tail" → [41:46]
+        expected = [17, 18, 19, 20, 41, 42, 43, 44, 45, 46]
+        for i, orig in enumerate(expected):
+            assert mapping.to_original(i) == orig, (
+                f"clean pos {i}: expected {orig}, got {mapping.to_original(i)}"
+            )
+
+    # -- both cleaners must produce identical results -----------------------
+
+    def test_nested_html_both_cleaners_agree(self) -> None:
+        """TagStripCleaner and HTMLParserTagStripCleaner must agree on clean
+        text and on every position mapping for all nested-HTML cases."""
+        cases = [
+            "<div><p><b>Hello world</b></p></div>",
+            "<div>Outer<p>Inner</p>End</div>",
+            "<p>First.</p><p>Second.</p>",
+            "A<br/>B<br/>C",
+            "<div><section><p>Deep</p></section></div> tail",
+        ]
+        tag_cleaner = TagStripCleaner()
+        html_cleaner = HTMLParserTagStripCleaner()
+
+        for html in cases:
+            clean_tag, m_tag = tag_cleaner.clean(html)
+            clean_html, m_html = html_cleaner.clean(html)
+
+            assert clean_tag == clean_html, (
+                f"clean text mismatch for {html!r}: {clean_tag!r} vs {clean_html!r}"
+            )
+            for i in range(len(clean_tag) + 1):
+                assert m_tag.to_original(i) == m_html.to_original(i), (
+                    f"position {i} mismatch for {html!r}: "
+                    f"tag={m_tag.to_original(i)}, html={m_html.to_original(i)}"
+                )
+
+
+class TestTagStripCleanerNested(_NestedHTMLMixin):
+    def _make_cleaner(self) -> TagStripCleaner:
+        return TagStripCleaner()
+
+
+class TestHTMLParserTagStripCleanerNested(_NestedHTMLMixin):
+    def _make_cleaner(self) -> HTMLParserTagStripCleaner:
+        return HTMLParserTagStripCleaner()
