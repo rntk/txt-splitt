@@ -651,7 +651,7 @@ class TestHierarchicalTopicRangeLLM:
 
     # -- Prompt size budget (#13) ---------------------------------------------
 
-    def test_max_prompt_chars_skips_oversized_batch(self) -> None:
+    def test_max_prompt_chars_skips_oversized_refine_batch(self) -> None:
         """Batches whose refine prompt exceeds max_prompt_chars are skipped."""
         coarse_response = "Technology>AI: 0-49\nBusiness>Finance: 50-99"
         client = MagicMock()
@@ -661,13 +661,70 @@ class TestHierarchicalTopicRangeLLM:
         ]
 
         mt = self._make_large_marked_text(100)
-        # Set a very small budget — first batch prompt will be too large
-        llm = HierarchicalTopicRangeLLM(max_prompt_chars=100)
+        # Use a minimal coarse builder so coarse prompts are small (~1800),
+        # while refine prompts stay at their default size (~4350).
+        # Budget of 4000 allows coarse but not refine.
+        llm = HierarchicalTopicRangeLLM(
+            max_prompt_chars=4000,
+            coarse_prompt_builder=lambda text: f"Coarse:\n{text}",
+        )
         _drive_llm(llm, mt, client)
 
-        # Both prompts exceed the tiny budget, so all batches fall through
-        # to the empty-requests path. The client is only called for coarse.
+        # Only the coarse call succeeds; refine batches exceed budget.
         assert client.call.call_count == 1  # only the coarse call
+
+    def test_max_prompt_chars_skips_oversized_coarse_prompt(self) -> None:
+        """With a tiny budget the coarse prompt itself is skipped."""
+        client = MagicMock()
+        mt = self._make_large_marked_text(100)
+        llm = HierarchicalTopicRangeLLM(max_prompt_chars=100)
+        result = _drive_llm(llm, mt, client)
+
+        assert client.call.call_count == 0
+        assert result == ""
+
+    def test_max_prompt_chars_auto_chunks_when_no_chunker(self) -> None:
+        """When content+overhead exceeds budget, auto-chunking kicks in."""
+        # 100 sentences → content ~1779 chars, coarse overhead ~3103
+        # Budget allows ~600 chars of content per chunk → multiple chunks
+        budget = 3800
+        coarse_response_1 = "Technology>AI: 0-49"
+        coarse_response_2 = "Business>Finance: 50-99"
+        client = MagicMock()
+        client.call.side_effect = [
+            coarse_response_1,
+            coarse_response_2,
+            "Neural Nets: 0-49",
+            "Stocks: 50-99",
+        ]
+
+        mt = self._make_large_marked_text(100)
+        llm = HierarchicalTopicRangeLLM(max_prompt_chars=budget)
+        _drive_llm(llm, mt, client)
+
+        # Auto-chunking should split the input, resulting in multiple coarse calls
+        coarse_calls = [c for c in client.call.call_args_list if len(c[0][0]) <= budget]
+        assert len(coarse_calls) >= 2
+
+    def test_single_stage_falls_back_to_coarse_refine_on_budget(self) -> None:
+        """When single-stage prompt exceeds budget, it falls back to coarse+refine."""
+        # 14 sentences → under single_stage_threshold (15).
+        # Default refine prompt ~3503, default coarse prompt ~3333.
+        # Budget of 3400 triggers fallback: refine too big, coarse fits.
+        lines = [f"{{{i}}} Sentence {i}." for i in range(14)]
+        mt = MarkedText(tagged_text="\n".join(lines), sentence_count=14)
+
+        coarse_response = "Technology>AI: 0-13"
+        client = MagicMock()
+        client.call.side_effect = [coarse_response]
+
+        llm = HierarchicalTopicRangeLLM(max_prompt_chars=3400)
+        _drive_llm(llm, mt, client)
+
+        # Should have reached the coarse stage (not single-stage refine).
+        assert client.call.call_count == 1
+        prompt_sent = client.call.call_args_list[0][0][0]
+        assert "broad content sections" in prompt_sent  # coarse prompt marker
 
     def test_invalid_max_prompt_chars_raises(self) -> None:
         with pytest.raises(ValueError, match="max_prompt_chars must be >= 0"):

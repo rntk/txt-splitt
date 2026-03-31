@@ -14,6 +14,7 @@ from txt_splitt.errors import LLMError, ParseError
 from txt_splitt.llms.utils import looks_repetitive
 from txt_splitt.pipeline import CompletedStage, PendingStage, StageResult
 from txt_splitt.protocols import LLMRequest, LLMResponse
+from txt_splitt.sentences.chunkers import SizeBasedChunker
 from txt_splitt.sentences.parsers import TopicRangeParser
 from txt_splitt.sentences.types import MarkedText, SentenceGroup, SentenceRange
 
@@ -348,6 +349,12 @@ class HierarchicalTopicRangeLLM:
 
     response_format: str = "text"
 
+    def _coarse_prompt_overhead(self, sentence_count: int) -> int:
+        """Return the character size of the coarse prompt template without content."""
+        if self._coarse_prompt_builder is not None:
+            return len(self._coarse_prompt_builder(""))
+        return len(_build_coarse_topic_ranges_prompt("", sentence_count=sentence_count))
+
     def plan_query(self, marked_text: MarkedText) -> StageResult[str]:
         """Emit coarse requests, then refine requests, then final text.
 
@@ -361,30 +368,51 @@ class HierarchicalTopicRangeLLM:
         ):
             return self._plan_single_stage(marked_text)
 
-        chunks = (
-            self._chunker.chunk(marked_text)
-            if self._chunker is not None
-            else [marked_text]
-        )
-        coarse_requests = tuple(
-            LLMRequest(
-                prompt=(
-                    self._coarse_prompt_builder(chunk.tagged_text)
-                    if self._coarse_prompt_builder is not None
-                    else _build_coarse_topic_ranges_prompt(
-                        chunk.tagged_text,
-                        sentence_count=marked_text.sentence_count,
-                    )
-                ),
-                temperature=self._temperature,
-                response_format=self.response_format,
-                stage_name="topic_range.coarse",
-                metadata={"namespace": "topic-range"},
+        chunker = self._chunker
+        if chunker is None and self._max_prompt_chars > 0:
+            overhead = self._coarse_prompt_overhead(marked_text.sentence_count)
+            max_content = self._max_prompt_chars - overhead
+            if max_content > 0 and len(marked_text.tagged_text) > max_content:
+                _logger.info(
+                    "Content (%d chars) exceeds prompt budget after overhead "
+                    "(%d chars); auto-chunking at %d chars",
+                    len(marked_text.tagged_text),
+                    overhead,
+                    max_content,
+                )
+                chunker = SizeBasedChunker(max_chars=max_content)
+
+        chunks = chunker.chunk(marked_text) if chunker is not None else [marked_text]
+        coarse_requests: list[LLMRequest] = []
+        for chunk in chunks:
+            prompt = (
+                self._coarse_prompt_builder(chunk.tagged_text)
+                if self._coarse_prompt_builder is not None
+                else _build_coarse_topic_ranges_prompt(
+                    chunk.tagged_text,
+                    sentence_count=marked_text.sentence_count,
+                )
             )
-            for chunk in chunks
-        )
+            if self._max_prompt_chars > 0 and len(prompt) > self._max_prompt_chars:
+                _logger.warning(
+                    "Coarse prompt exceeds budget (%d > %d chars), skipping chunk",
+                    len(prompt),
+                    self._max_prompt_chars,
+                )
+                continue
+            coarse_requests.append(
+                LLMRequest(
+                    prompt=prompt,
+                    temperature=self._temperature,
+                    response_format=self.response_format,
+                    stage_name="topic_range.coarse",
+                    metadata={"namespace": "topic-range"},
+                )
+            )
+        if not coarse_requests:
+            return CompletedStage("")
         return PendingStage(
-            requests=coarse_requests,
+            requests=tuple(coarse_requests),
             resume=lambda responses: self._resume_coarse(marked_text, responses),
         )
 
@@ -400,6 +428,14 @@ class HierarchicalTopicRangeLLM:
                 assign_ranges=(full_range,),
             )
         )
+        if self._max_prompt_chars > 0 and len(prompt) > self._max_prompt_chars:
+            _logger.warning(
+                "Single-stage prompt exceeds budget (%d > %d chars), "
+                "falling back to coarse+refine path",
+                len(prompt),
+                self._max_prompt_chars,
+            )
+            return self._plan_coarse_refine(marked_text)
         request = LLMRequest(
             prompt=prompt,
             temperature=self._temperature,
@@ -412,6 +448,49 @@ class HierarchicalTopicRangeLLM:
             resume=lambda responses: CompletedStage(
                 self._parse_single_stage(responses, marked_text.sentence_count)
             ),
+        )
+
+    def _plan_coarse_refine(self, marked_text: MarkedText) -> StageResult[str]:
+        """Coarse+refine path used as fallback when single-stage exceeds budget."""
+        chunker = self._chunker
+        if chunker is None and self._max_prompt_chars > 0:
+            overhead = self._coarse_prompt_overhead(marked_text.sentence_count)
+            max_content = self._max_prompt_chars - overhead
+            if max_content > 0 and len(marked_text.tagged_text) > max_content:
+                chunker = SizeBasedChunker(max_chars=max_content)
+
+        chunks = chunker.chunk(marked_text) if chunker is not None else [marked_text]
+        coarse_requests: list[LLMRequest] = []
+        for chunk in chunks:
+            prompt = (
+                self._coarse_prompt_builder(chunk.tagged_text)
+                if self._coarse_prompt_builder is not None
+                else _build_coarse_topic_ranges_prompt(
+                    chunk.tagged_text,
+                    sentence_count=marked_text.sentence_count,
+                )
+            )
+            if self._max_prompt_chars > 0 and len(prompt) > self._max_prompt_chars:
+                _logger.warning(
+                    "Coarse prompt exceeds budget (%d > %d chars), skipping chunk",
+                    len(prompt),
+                    self._max_prompt_chars,
+                )
+                continue
+            coarse_requests.append(
+                LLMRequest(
+                    prompt=prompt,
+                    temperature=self._temperature,
+                    response_format=self.response_format,
+                    stage_name="topic_range.coarse",
+                    metadata={"namespace": "topic-range"},
+                )
+            )
+        if not coarse_requests:
+            return CompletedStage("")
+        return PendingStage(
+            requests=tuple(coarse_requests),
+            resume=lambda responses: self._resume_coarse(marked_text, responses),
         )
 
     def _parse_single_stage(
