@@ -173,15 +173,28 @@ HIERARCHY RULES:
 - Use 2-4 levels separated by ">".
 - Top level: broad domain (Technology, Business, Science, Politics, Health,
   Culture, Sport — or another fitting broad category).
-- Bottom level: the specific named subject — a product, person, study, event,
-  law, or use case. Name it by its concrete subject, not by its structural role.
+- Bottom level: a compact 2-3 word tag naming the concrete subject
+  (product, person, study, event, law, use case, argument). Use key nouns
+  and one qualifier at most — like a search tag, not a headline. Do NOT
+  copy or paraphrase article titles; extract only the 2-3 most identifying
+  keywords.
+- Bottom-level labels must NOT be generic category words standing alone.
+  Forbidden bottom-level labels include: Comparison, Review, Analysis,
+  Training, Culture, Features, Promotion, Overview, Discussion, Update,
+  Productivity, Productivity Tools, Product Features, Product Promotion,
+  Knowledge Base, Model Comparison, Newsletter, and similar vague terms.
+- Different articles, stories, or reviews MUST each get their own separate
+  topic line with a unique descriptive label — even if they share a broad
+  domain. Never merge distinct stories under one generic label.
 - Use canonical names and official capitalization for products, companies,
   people, and technologies.
 - Never use "Metadata" as a topic path segment unless the text is truly content-free.
-- Never use structural or positional labels: Intro, Header, Footer, Closing,
-  Subscription, Digest, Roundup, Miscellaneous, etc.
-- Attach boilerplate (headers, footers, bylines, promo copy, subscribe links,
-  standalone "Read more" links) to the nearest real-content section.
+- NEVER use structural or positional labels: Intro, Header, Footer, Closing,
+  Subscription, Digest, Roundup, Miscellaneous, CTA, etc.
+- NEVER create a separate topic section for boilerplate. Boilerplate (headers,
+  footers, bylines, promo copy, subscribe/unsubscribe links, standalone
+  "Read more" links, sign-up CTAs, referral links) must be attached to the
+  nearest real-content section — extend that section's range to include it.
 
 ASSIGNMENT RULES:
 - Every marker ID shown in <content> must belong to exactly one topic line.
@@ -189,7 +202,6 @@ ASSIGNMENT RULES:
 - Keep adjacent markers that continue one idea in the same section.
 - Separate clearly different stories or subjects with DISTINCT labels.
 - Use ":" only once per line, immediately before the marker ranges.
-- When in doubt, extend an existing section rather than creating a new one.
 
 CONCISENESS:
 - Do not copy or quote text from <content> in your output.
