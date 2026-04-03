@@ -16,6 +16,7 @@ from txt_splitt.sentences.joiners import (
 )
 from txt_splitt.sentences.llm import (
     HierarchicalTopicRangeLLM,
+    TopicRangeLLM,
 )
 from txt_splitt.sentences.markers import BracketMarker
 from txt_splitt.sentences.normalizers import NormalizingSplitter
@@ -82,6 +83,7 @@ __all__ = [
     "SplitResult",
     "StrictGapHandler",
     "TopicExtractor",
+    "TopicRangeLLM",
     "TopicRangeParser",
     "_indices_to_ranges",
     "build_pipeline",

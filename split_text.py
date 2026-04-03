@@ -34,7 +34,6 @@ from txt_splitt.sentences import (
     AdjacentSameTopicJoiner,
     BoundaryEvaluator,
     BracketMarker,
-    HierarchicalTopicRangeLLM,
     LLMRepairingGapHandler,
     MappingOffsetRestorer,
     OptimizingMarker,
@@ -42,6 +41,7 @@ from txt_splitt.sentences import (
     SentencePipeline,
     ShortSentenceEnhancer,
     SparseRegexSentenceSplitter,
+    TopicRangeLLM,
     TopicRangeParser,
     build_pipeline,
 )
@@ -517,11 +517,6 @@ def main() -> None:
         help="Max concurrent requests for async mode (default: 10)",
     )
     parser.add_argument(
-        "--single-stage",
-        action="store_true",
-        help="Use single-stage LLM split instead of two-stage",
-    )
-    parser.add_argument(
         "--cache-db",
         help=(
             "SQLite database path for persistent LLM response caching. "
@@ -584,31 +579,25 @@ def create_pipeline(
             )
         )
 
-    if args.single_stage:
-        return build_pipeline(
-            splitter=splitter,
-            marker=OptimizingMarker(BracketMarker()),
-            llm=HierarchicalTopicRangeLLM(
-                temperature=args.temperature,
-                chunker=OverlapChunker(max_chars=args.max_chunk_chars),
-            ),
-            parser=TopicRangeParser(),
-            gap_handler=LLMRepairingGapHandler(
-                gap_repair_llm,
-                temperature=args.temperature,
-                tracer=tracer,
-            ),
-            enhancers=enhancers,
-            joiner=AdjacentSameTopicJoiner(),
-            html_cleaner=html_cleaner,
-            offset_restorer=offset_restorer,
+    return build_pipeline(
+        splitter=splitter,
+        marker=OptimizingMarker(BracketMarker()),
+        llm=TopicRangeLLM(
+            temperature=args.temperature,
+            chunker=OverlapChunker(max_chars=args.max_chunk_chars),
+        ),
+        parser=TopicRangeParser(),
+        gap_handler=LLMRepairingGapHandler(
+            gap_repair_llm,
+            temperature=args.temperature,
             tracer=tracer,
-        )
-    msg = (
-        "Two-stage pipeline (without --single-stage) is no longer supported "
-        "after removing TopicListLLM and TopicRangeAssignmentLLM."
+        ),
+        enhancers=enhancers,
+        joiner=AdjacentSameTopicJoiner(),
+        html_cleaner=html_cleaner,
+        offset_restorer=offset_restorer,
+        tracer=tracer,
     )
-    raise NotImplementedError(msg)
 
 
 def _build_clients(

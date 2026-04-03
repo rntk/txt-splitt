@@ -22,7 +22,7 @@ from txt_splitt import (
     TracingLLMCallable,
 )
 from txt_splitt.sentences import (
-    HierarchicalTopicRangeLLM,
+    TopicRangeLLM,
 )
 
 
@@ -48,7 +48,6 @@ def _make_args(**overrides: object) -> SimpleNamespace:
         "boundary_context_window": 3,
         "boundary_max_shift": 2,
         "temperature": 0.0,
-        "single_stage": False,
         "max_chunk_chars": 84_000,
         "max_concurrent": 10,
     }
@@ -99,13 +98,11 @@ def test_wrap_async_llm_applies_cache_before_tracing(tmp_path: Path) -> None:
     assert wrapped._inner._namespace == "topic-range-assignment"
 
 
-def test_create_pipeline_uses_single_stage_only(tmp_path: Path) -> None:
-    """Two-stage pipeline is no longer supported - only single-stage works."""
+def test_create_pipeline_uses_topic_range_llm(tmp_path: Path) -> None:
     args = _make_args(
         cache_db=str(tmp_path / "cache.sqlite"),
         short_sentence_min_length=0,
         boundary_max_shift=0,
-        single_stage=True,
     )
     pipeline = create_pipeline(
         args,
@@ -114,22 +111,7 @@ def test_create_pipeline_uses_single_stage_only(tmp_path: Path) -> None:
         cache_store=build_cache_store(args),
     )
 
-    assert isinstance(pipeline._llm, HierarchicalTopicRangeLLM)
-
-
-def test_create_pipeline_two_stage_raises_not_implemented(tmp_path: Path) -> None:
-    """Two-stage pipeline (single_stage=False) raises NotImplementedError."""
-    args = _make_args(
-        cache_db=str(tmp_path / "cache.sqlite"),
-        single_stage=False,
-    )
-    with pytest.raises(NotImplementedError, match="Two-stage pipeline"):
-        create_pipeline(
-            args,
-            Path("input.txt"),
-            tracer=Tracer(),
-            cache_store=build_cache_store(args),
-        )
+    assert isinstance(pipeline._llm, TopicRangeLLM)
 
 
 def test_namespace_for_request_returns_explicit_namespace() -> None:
@@ -146,7 +128,7 @@ def test_namespace_for_request_raises_when_missing() -> None:
     request = LLMRequest(
         prompt="prompt",
         temperature=0.0,
-        stage_name="topic_range.coarse",
+        stage_name="topic_range.single_stage",
     )
 
     with pytest.raises(ValueError, match="missing a valid namespace"):
