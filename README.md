@@ -9,7 +9,7 @@ The pipeline processes input text through a sequence of stages to produce semant
 1. **HTML Cleaning** (Optional): Strips tags while preserving offset data to allow mapping back to the original source.
 2. **Sentence Splitting**: Breaks the text into individual sentence units.
 3. **Marking**: Indexes sentences to prepare them for LLM reference.
-4. **Semantic Analysis**: Uses an LLM to identify topics and ranges. Supports both single-pass and two-stage (topic extraction followed by assignment) strategies.
+4. **Semantic Analysis**: Uses an LLM to identify topics and ranges.
 5. **Parsing**: Interprets the LLM's output into structured groups.
 6. **Gap Handling**: Validates coverage and assigns any skipped sentences or gaps to ensure completeness.
 7. **Enhancement** (Optional): Refines boundaries by re-evaluating ambiguous sentences at group edges.
@@ -48,7 +48,7 @@ the wrapper. The wrapper owns key generation; your store only needs `get()` and
 
 ```python
 from txt_splitt import CachingLLMCallable
-from txt_splitt.sentences import HierarchicalTopicRangeLLM
+from txt_splitt.sentences import TopicRangeLLM
 
 cached_client = CachingLLMCallable(
     inner=my_llm_client,
@@ -58,7 +58,7 @@ cached_client = CachingLLMCallable(
     prompt_version="v1",
 )
 
-llm = HierarchicalTopicRangeLLM(cached_client)
+llm = TopicRangeLLM(cached_client)
 ```
 
 ## Development with Docker

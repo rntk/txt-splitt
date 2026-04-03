@@ -14,10 +14,7 @@ from txt_splitt.sentences.joiners import (
     AdjacentSameTopicJoiner,
     join_sentences_by_groups,
 )
-from txt_splitt.sentences.llm import (
-    HierarchicalTopicRangeLLM,
-    TopicRangeLLM,
-)
+from txt_splitt.sentences.llm import TopicRangeLLM
 from txt_splitt.sentences.markers import BracketMarker
 from txt_splitt.sentences.normalizers import NormalizingSplitter
 from txt_splitt.sentences.offset_restorers import MappingOffsetRestorer
@@ -58,7 +55,6 @@ __all__ = [
     "Enhancer",
     "GapHandler",
     "GroupJoiner",
-    "HierarchicalTopicRangeLLM",
     "LLMRepairingGapHandler",
     "MarkedText",
     "MarkedTextChunker",

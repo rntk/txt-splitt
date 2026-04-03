@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from txt_splitt.sentences.llm import HierarchicalTopicRangeLLM
+from txt_splitt.sentences.llm import TopicRangeLLM
 
 if TYPE_CHECKING:
     from txt_splitt.sentences.protocols import MarkedTextChunker
@@ -18,17 +18,17 @@ def build_insight_llm(
     *,
     temperature: float = 0.0,
     chunker: MarkedTextChunker | None = None,
-) -> HierarchicalTopicRangeLLM:
-    """Create a HierarchicalTopicRangeLLM configured for insight extraction.
+) -> TopicRangeLLM:
+    """Create a TopicRangeLLM configured for insight extraction.
 
     Uses the insight-specific prompt instead of the default topic-range prompt.
     The returned object produces LLM requests that must be executed by a client.
     Use plan_query() to get requests, then drive execution with a client.
     """
-    return HierarchicalTopicRangeLLM(
+    return TopicRangeLLM(
         temperature=temperature,
         chunker=chunker,
-        coarse_prompt_builder=_build_insights_prompt,
+        prompt_builder=_build_insights_prompt,
     )
 
 

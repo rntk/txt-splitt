@@ -20,7 +20,7 @@ from txt_splitt.errors import LLMError
 from txt_splitt.pipeline import PendingStage
 from txt_splitt.protocols import LLMCallable, LLMResponse
 from txt_splitt.sentences.gap_handlers import LLMRepairingGapHandler
-from txt_splitt.sentences.llm import HierarchicalTopicRangeLLM
+from txt_splitt.sentences.llm import TopicRangeLLM
 from txt_splitt.sentences.types import (
     MarkedText,
     Sentence,
@@ -234,7 +234,7 @@ class TestSQLiteLLMCacheStore:
 
 
 def _drive_llm(
-    llm: HierarchicalTopicRangeLLM,
+    llm: TopicRangeLLM,
     mt: MarkedText,
     client: LLMCallable,
 ) -> str:
@@ -263,11 +263,11 @@ class TestCacheIntegration:
             namespace="topic-range",
             prompt_version="v1",
         )
-        llm = HierarchicalTopicRangeLLM()
+        llm = TopicRangeLLM()
         marked_text = MarkedText(tagged_text="{0} A", sentence_count=1)
 
-        assert _drive_llm(llm, marked_text, client) == "Topic: 0"
-        assert _drive_llm(llm, marked_text, client) == "Topic: 0"
+        assert _drive_llm(llm, marked_text, client) == "Topic: 0-1"
+        assert _drive_llm(llm, marked_text, client) == "Topic: 0-1"
         assert inner.call.call_count == 1  # single-stage; second run uses cache
 
     def test_gap_handler_uses_cached_client(self) -> None:
