@@ -10,6 +10,7 @@ from datetime import datetime
 from html import escape
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Callable
 
 # Add src to path so we can import txt_splitt when running from root
@@ -153,6 +154,7 @@ def generate_html_report(
     source_text: str,
     input_file: Path,
     trace_output: str | None = None,
+    execution_time_seconds: float | None = None,
 ) -> str:
     """Generate HTML report content from split result."""
     data = result_to_dict(result)
@@ -298,6 +300,12 @@ def generate_html_report(
         "    <h1>Sentence Grouping Report</h1>",
         "    <div class='json-block'>",
         "        <h2>Diagnostics</h2>",
+        (
+            "        <p><strong>Total execution time:</strong> "
+            f"{execution_time_seconds:.3f} seconds</p>"
+            if execution_time_seconds is not None
+            else "        <p><strong>Total execution time:</strong> N/A</p>"
+        ),
         "        <div class='report-tabs'>",
         "            <div class='report-tab-buttons'>",
         "                <button class='report-tab-button active' "
@@ -749,19 +757,28 @@ def run_sync(args: Any) -> None:
 
     print(f"Processing '{args.input_file}'...")
     trace_output: str | None = None
+    execution_time_seconds: float | None = None
+    start_time = perf_counter()
     try:
         result = execute_session_sync(pipeline, text, clients)
     except Exception as e:
         print(f"Error processing text: {e}", file=sys.stderr)
         sys.exit(1)
     finally:
+        execution_time_seconds = perf_counter() - start_time
         if tracer:
             trace_output = tracer.format()
             print(trace_output, file=sys.stderr)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_file = Path(f"{input_path.stem}_report_{timestamp}.html")
-    report_html = generate_html_report(result, text, input_path, trace_output)
+    report_html = generate_html_report(
+        result,
+        text,
+        input_path,
+        trace_output,
+        execution_time_seconds,
+    )
     output_file.write_text(report_html, encoding="utf-8")
 
     print(f"Results saved to '{output_file}'")
@@ -800,6 +817,8 @@ async def run_async(args: Any) -> None:
         f"max {args.max_concurrent} concurrent)..."
     )
     trace_output: str | None = None
+    execution_time_seconds: float | None = None
+    start_time = perf_counter()
     try:
         result = await execute_session_async(
             pipeline,
@@ -811,13 +830,20 @@ async def run_async(args: Any) -> None:
         print(f"Error processing text: {e}", file=sys.stderr)
         sys.exit(1)
     finally:
+        execution_time_seconds = perf_counter() - start_time
         if tracer:
             trace_output = tracer.format()
             print(trace_output, file=sys.stderr)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_file = Path(f"{input_path.stem}_report_{timestamp}.html")
-    report_html = generate_html_report(result, text, input_path, trace_output)
+    report_html = generate_html_report(
+        result,
+        text,
+        input_path,
+        trace_output,
+        execution_time_seconds,
+    )
     output_file.write_text(report_html, encoding="utf-8")
 
     print(f"Results saved to '{output_file}'")

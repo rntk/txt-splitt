@@ -9,6 +9,7 @@ from split_text import (
     _namespace_for_request,
     build_cache_store,
     create_pipeline,
+    generate_html_report,
     wrap_async_llm,
     wrap_sync_llm,
 )
@@ -133,3 +134,28 @@ def test_namespace_for_request_raises_when_missing() -> None:
 
     with pytest.raises(ValueError, match="missing a valid namespace"):
         _namespace_for_request(request)
+
+
+def test_generate_html_report_includes_total_execution_time() -> None:
+    result = SimpleNamespace(
+        sentences=[
+            SimpleNamespace(index=0, start=0, end=12, text="Hello world."),
+        ],
+        groups=[
+            SimpleNamespace(
+                label=("topic",),
+                ranges=[SimpleNamespace(start=0, end=0)],
+            )
+        ],
+    )
+
+    report = generate_html_report(
+        result,
+        "Hello world.",
+        Path("input.txt"),
+        trace_output="trace",
+        execution_time_seconds=1.23456,
+    )
+
+    assert "Total execution time:" in report
+    assert "1.235 seconds" in report
