@@ -295,9 +295,9 @@ class TestPipelineTracing:
         assert root.name == "pipeline.run"
         assert root.attributes["input_length"] == 9
 
-        # 4 child stages (no enhancer)
+        # 5 child stages: split, mark, parse, gap_handler, merger (no enhancer)
         children = root.children
-        assert len(children) == 4
+        assert len(children) == 5
         assert children[0].name == "split"
         assert children[0].attributes["sentence_count"] == 3
         assert children[1].name == "mark"
@@ -305,6 +305,7 @@ class TestPipelineTracing:
         assert children[2].name == "parse"
         assert children[2].attributes["group_count"] == 1
         assert children[3].name == "gap_handler"
+        assert children[4].name == "similar_topic_merge"
 
     def test_pipeline_with_tracer_and_enhancer(self) -> None:
         tracer = Tracer()
@@ -329,8 +330,9 @@ class TestPipelineTracing:
         pipeline.run("text")
 
         root = tracer.spans[0]
-        assert len(root.children) == 5
+        assert len(root.children) == 6
         assert root.children[4].name == "enhance"
+        assert root.children[5].name == "similar_topic_merge"
 
     def test_format_contains_all_stages(self) -> None:
         tracer = Tracer()

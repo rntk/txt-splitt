@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from txt_splitt.sentences.types import Sentence, SentenceGroup, SentenceRange
 
 
@@ -83,6 +85,44 @@ def _join_sentence_range(
         end=selected[-1].end,
         text=" ".join(sentence.text for sentence in selected).strip(),
     )
+
+
+class SimilarTopicMerger:
+    """Merge groups that share a normalized topic label.
+
+    Handles LLM outputs like 'Technology>Machine Learning' and
+    'Technology>MachineLearning' mapping to the same canonical topic.
+    Canonical label = first-seen label for each normalized key.
+    Output groups are re-sorted by their earliest range start.
+    """
+
+    def merge(self, groups: list[SentenceGroup]) -> list[SentenceGroup]:
+        if not groups:
+            return []
+
+        key_to_canonical: dict[tuple[str, ...], tuple[str, ...]] = {}
+        canonical_to_ranges: dict[tuple[str, ...], list[SentenceRange]] = {}
+
+        for group in groups:
+            norm_key = _normalize_label_key(group.label)
+            if norm_key not in key_to_canonical:
+                key_to_canonical[norm_key] = group.label
+                canonical_to_ranges[group.label] = []
+            canonical = key_to_canonical[norm_key]
+            canonical_to_ranges[canonical].extend(group.ranges)
+
+        result: list[SentenceGroup] = []
+        for canonical, ranges in canonical_to_ranges.items():
+            merged = _merge_ranges(tuple(ranges))
+            result.append(SentenceGroup(label=canonical, ranges=merged))
+
+        result.sort(key=lambda g: min(r.start for r in g.ranges))
+        return result
+
+
+def _normalize_label_key(label: tuple[str, ...]) -> tuple[str, ...]:
+    """Return a comparison key that ignores whitespace, punctuation, and case."""
+    return tuple(re.sub(r"[^a-z0-9]", "", part.lower()) for part in label)
 
 
 def _touches_or_overlaps(left: SentenceGroup, right: SentenceGroup) -> bool:

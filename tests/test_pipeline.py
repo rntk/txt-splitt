@@ -1017,3 +1017,101 @@ class TestPipelineHtmlCleaning:
 
         assert len(result.sentences) == 3
         assert result.groups[0].label == ("Technology", "AI")
+
+    def test_similar_topic_merger_merges_whitespace_variants_in_pipeline(self) -> None:
+        """Verify 'Machine Learning' and 'MachineLearning' variants merge."""
+        sentences = _make_sentences(4)
+        # Simulate LLM returning two different forms of the same topic
+        # Group 1: "Technology>Machine Learning: 0-1"
+        # Group 2: "Technology>MachineLearning: 2-3"
+        groups = [
+            SentenceGroup(
+                label=("Technology", "Machine Learning"),
+                ranges=(SentenceRange(start=0, end=1),),
+            ),
+            SentenceGroup(
+                label=("Technology", "MachineLearning"),
+                ranges=(SentenceRange(start=2, end=3),),
+            ),
+        ]
+
+        pipeline = build_pipeline(
+            splitter=StubSplitter(sentences),
+            marker=StubMarker(MarkedText(tagged_text="...", sentence_count=4)),
+            llm=StubLLM("..."),
+            parser=StubParser(groups),
+            gap_handler=StubGapHandler(groups),
+        )
+        result = pipeline.run("Some text")
+
+        # After merging, should have only 1 group (the two variants merged into one)
+        assert len(result.groups) == 1
+        # Canonical label is the first-seen form
+        assert result.groups[0].label == ("Technology", "Machine Learning")
+
+    def test_similar_topic_merger_merges_punctuation_variants_in_pipeline(self) -> None:
+        """Verify that topic variants with different punctuation merge."""
+        sentences = _make_sentences(3)
+        groups = [
+            SentenceGroup(
+                label=("Business", "AI-Powered"),
+                ranges=(SentenceRange(start=0, end=0),),
+            ),
+            SentenceGroup(
+                label=("Business", "AI Powered"),
+                ranges=(SentenceRange(start=1, end=1),),
+            ),
+            SentenceGroup(
+                label=("Business", "AIPowered"),
+                ranges=(SentenceRange(start=2, end=2),),
+            ),
+        ]
+
+        pipeline = build_pipeline(
+            splitter=StubSplitter(sentences),
+            marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
+            llm=StubLLM("..."),
+            parser=StubParser(groups),
+            gap_handler=StubGapHandler(groups),
+        )
+        result = pipeline.run("Some text")
+
+        assert len(result.groups) == 1
+        # First-seen variant is canonical
+        assert result.groups[0].label == ("Business", "AI-Powered")
+
+    def test_similar_topic_merger_disabled_preserves_strict_matching(self) -> None:
+        """Verify that merge_similar_topics=False preserves exact matching behavior."""
+        sentences = _make_sentences(3)
+        groups = [
+            SentenceGroup(
+                label=("Tech", "ML"),
+                ranges=(SentenceRange(start=0, end=0),),
+            ),
+            SentenceGroup(
+                label=("Tech", "Machine Learning"),
+                ranges=(SentenceRange(start=1, end=1),),
+            ),
+            SentenceGroup(
+                label=("Tech", "ML"),
+                ranges=(SentenceRange(start=2, end=2),),
+            ),
+        ]
+
+        pipeline = build_pipeline(
+            splitter=StubSplitter(sentences),
+            marker=StubMarker(MarkedText(tagged_text="...", sentence_count=3)),
+            llm=StubLLM("..."),
+            parser=StubParser(groups),
+            gap_handler=StubGapHandler(groups),
+            merge_similar_topics=False,
+        )
+        result = pipeline.run("Some text")
+
+        # With merging disabled, each distinct label remains separate.
+        # "ML" appears twice but not adjacent (Machine Learning is between them),
+        # so they don't get merged by the adjacent joiner.
+        assert len(result.groups) == 3
+        assert result.groups[0].label == ("Tech", "ML")
+        assert result.groups[1].label == ("Tech", "Machine Learning")
+        assert result.groups[2].label == ("Tech", "ML")

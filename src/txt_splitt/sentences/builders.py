@@ -14,7 +14,7 @@ from txt_splitt.pipeline import (
     PostProcessor,
     StageResult,
 )
-from txt_splitt.sentences.joiners import join_sentences_by_groups
+from txt_splitt.sentences.joiners import SimilarTopicMerger, join_sentences_by_groups
 from txt_splitt.sentences.types import MarkedText, Sentence, SentenceGroup, SplitResult
 from txt_splitt.tracer import NoOpTracer
 
@@ -178,6 +178,22 @@ class _JoinerProcessor(PostProcessor[Sentence, list[SentenceGroup]]):
         return PipelineState(items=sentences, value=groups)
 
 
+@dataclass(frozen=True, slots=True)
+class _SimilarTopicMergerProcessor(PostProcessor[Sentence, list[SentenceGroup]]):
+    stage_name: str = "similar_topic_merge"
+
+    def process(
+        self,
+        state: PipelineState[Sentence, list[SentenceGroup]],
+        *,
+        text: str,
+        item_count: int,
+    ) -> PipelineState[Sentence, list[SentenceGroup]]:
+        del text, item_count
+        groups = SimilarTopicMerger().merge(state.value)
+        return PipelineState(items=list(state.items), value=groups)
+
+
 class _TwoStageQuery:
     def __init__(
         self,
@@ -244,6 +260,7 @@ def build_pipeline(
     html_cleaner: HtmlCleaner | None = None,
     offset_restorer: OffsetRestorer[SplitResult] | None = None,
     tracer: Tracer | None = None,
+    merge_similar_topics: bool = True,
 ) -> SentencePipeline:
     has_single = llm is not None
     has_two_stage = topic_extractor is not None or range_assigner is not None
@@ -282,6 +299,8 @@ def build_pipeline(
         processors.append(_EnhancerProcessor(enhancer=enhancer))
     if joiner is not None:
         processors.append(_JoinerProcessor(joiner=joiner))
+    if merge_similar_topics:
+        processors.append(_SimilarTopicMergerProcessor())
 
     pipeline: Pipeline[
         Sentence,

@@ -43,6 +43,7 @@ def _parse_text_groups(response: str, sentence_count: int) -> list[SentenceGroup
     lines = [ln.strip() for ln in response.strip().splitlines() if ln.strip()]
     grouped_ranges: dict[tuple[str, ...], list[SentenceRange]] = {}
     label_order: list[tuple[str, ...]] = []
+    key_to_canonical: dict[tuple[str, ...], tuple[str, ...]] = {}
 
     for ln in lines:
         # Try greedy regex first (handles colons in topic names)
@@ -64,6 +65,13 @@ def _parse_text_groups(response: str, sentence_count: int) -> list[SentenceGroup
         label = _normalize_label_parts(topic_path.split(">"))
         if not label:
             continue
+
+        # Deduplicate labels that differ only in internal whitespace/case
+        # e.g. "Machine Learning" and "MachineLearning" map to the same canonical
+        norm_key = _normalize_label_key(label)
+        if norm_key not in key_to_canonical:
+            key_to_canonical[norm_key] = label
+        label = key_to_canonical[norm_key]
 
         parsed_ranges = _parse_range_string(ranges_str)
         clamped: list[SentenceRange] = []
@@ -95,6 +103,16 @@ def _build_groups(
         raise ParseError("No valid topic ranges found in response")
 
     return groups
+
+
+def _normalize_label_key(label: tuple[str, ...]) -> tuple[str, ...]:
+    """Return a comparison key that ignores whitespace, punctuation, and case.
+
+    Maps e.g. ("Technology", "Machine Learning"),
+    ("Technology", "MachineLearning"), and ("Technology", "Machine-Learning")
+    all to the same key.
+    """
+    return tuple(re.sub(r"[^a-z0-9]", "", part.lower()) for part in label)
 
 
 def _normalize_label_parts(parts: Iterable[str]) -> tuple[str, ...]:
