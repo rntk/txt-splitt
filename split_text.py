@@ -605,6 +605,7 @@ def create_pipeline(
         html_cleaner=html_cleaner,
         offset_restorer=offset_restorer,
         tracer=tracer,
+        merge_similar_topics=True,
     )
 
 
