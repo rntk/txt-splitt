@@ -3,7 +3,7 @@
 from txt_splitt.sentences.batch_pipeline import BatchPipeline
 from txt_splitt.sentences.boundary_evaluator import BoundaryEvaluator
 from txt_splitt.sentences.builders import SentencePipeline, build_pipeline
-from txt_splitt.sentences.chunkers import OverlapChunker, SizeBasedChunker
+from txt_splitt.sentences.chunkers import OverlapChunker
 from txt_splitt.sentences.enhancers import ShortSentenceEnhancer
 from txt_splitt.sentences.gap_handlers import (
     LLMRepairingGapHandler,
@@ -74,7 +74,6 @@ __all__ = [
     "SentenceRange",
     "SentenceSplitter",
     "ShortSentenceEnhancer",
-    "SizeBasedChunker",
     "SparseRegexSentenceSplitter",
     "SplitResult",
     "StrictGapHandler",
