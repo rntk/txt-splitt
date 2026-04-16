@@ -94,13 +94,25 @@ class OverlapChunker:
         total_len = _text_len(lines)
 
         # Budget available for *new* content per chunk (overlap eats into
-        # max_chars, so the content portion is the remainder).
+        # max_chars, so the content portion is the remainder). The first
+        # chunk has no overlap, so it can hold max_chars of new content;
+        # every subsequent chunk can hold content_budget of new content.
         content_budget = self._max_chars - self._overlap_chars
         if content_budget <= 0:
             content_budget = 1  # degenerate but safe
 
-        num_chunks = max(1, math.ceil(total_len / content_budget))
-        target_size = total_len / num_chunks
+        # Minimum chunks a greedy packing would produce. We already
+        # returned above when the whole text fits in one chunk.
+        num_chunks = 1 + math.ceil(
+            (total_len - self._max_chars) / content_budget
+        )
+
+        # Balance by equal tagged_text size across chunks. Summed over N
+        # chunks, tagged_text totals total_len + (N-1)*overlap_chars
+        # (overlap is counted once per chunk after the first).
+        target_size = (
+            total_len + (num_chunks - 1) * self._overlap_chars
+        ) / num_chunks
 
         chunks: list[MarkedText] = []
         overlap_lines: list[str] = []
@@ -126,14 +138,11 @@ class OverlapChunker:
                 i += 1
                 new_count += 1
 
-                # Soft target: close the chunk once we reach the target,
-                # but only if there are more chunks to fill.
-                new_content_len = _text_len(
-                    current_lines[len(current_lines) - new_count :]
-                )
+                # Soft target: close the chunk once its tagged_text
+                # reaches the target, but only if more chunks remain.
                 if (
                     chunks_remaining > 0
-                    and new_content_len >= target_size
+                    and current_chars >= target_size
                     and i < len(lines)
                 ):
                     break
