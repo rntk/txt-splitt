@@ -202,8 +202,10 @@ OUTPUT FORMAT:
 - One topic path per line, sorted by first marker ID ascending.
 - Format: Category>Subcategory>SpecificTopic: MarkerRanges
 - Use 2-4 levels separated by ">".
-- Use ":" only once per line, immediately before the marker ranges.
-- MarkerRanges: 12-18 | 12-18, 33-36 | 12, 15, 18 | 12-18, 21, 24-27
+- The topic path and the marker ranges are ALWAYS separated by ":". Use ":"
+  only once per line, and never any other separator (no "|", "-", or dashes).
+- MarkerRanges are plain digits, "-" for spans and "," between them,
+  e.g. "12-18" or "12-18, 21, 24-27".
 - No bullets, numbering, commentary, markdown fences, or explanations.
 
 <content>
