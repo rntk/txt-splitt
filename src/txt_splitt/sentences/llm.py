@@ -161,7 +161,7 @@ SECURITY:
 
 PROCESS:
 1. Identify what the document is about. If it focuses on a specific product,
-   tool, character, or system, use that name as a consistent sub-level throughout.
+   tool, character, or system, use that name as a shared parent for its sections.
 2. Group adjacent markers into sections based on topic shifts.
 3. Name each section with a specific hierarchical path. Different stories,
    products, events, or subjects must get distinct labels even under the same heading.
@@ -171,15 +171,13 @@ PROCESS:
 HIERARCHY RULES:
 - Top level: broad domain (Technology, Business, Science, Politics, Health,
   Culture, Sport — or another fitting broad category).
-- Bottom level: a compact 2-3 word tag naming the concrete subject
+- Bottom level: a compact 1-3 word tag naming the concrete subject
   (product, person, study, event, law, use case, argument). Use key nouns
   and one qualifier at most — like a search tag, not a headline. Do NOT
-  copy or paraphrase article titles; extract only the 2-3 most identifying
+  copy or paraphrase article titles; extract only the 1-3 most identifying
   keywords.
-- If many sections share one subject, make that subject its own hierarchy
-  level rather than repeating it inside every bottom-level label.
-  A bottom-level label must not restate its parent;
-  it only needs to distinguish the section from its siblings under that parent.
+- When one subject spans multiple sections, place it once in their shared
+  parent path; child labels name only what differs.
 - Bottom-level labels must NOT be generic category words that say nothing
   beyond the parent path.
 - Different articles, stories, or reviews MUST each get their own separate
@@ -209,8 +207,8 @@ OUTPUT FORMAT:
 - Example line: Technology>AI Safety>Chain of Thought Monitoring: 12-18, 24
 - Use 2-4 levels separated by ">" (up to 5 when a document-wide subject
   needs its own level).
-- The topic path and the marker ranges are ALWAYS separated by ":". Use ":"
-  only once per line, and never any other separator (no "|", "-", or dashes).
+- Use ":" only once per line, between the topic path and marker ranges;
+  never use another separator (no "|", "-", or dashes).
 - MarkerRanges are plain digits, "-" for spans and "," between them,
   e.g. "12-18" or "12-18, 21, 24-27".
 - No bullets, numbering, commentary, markdown fences, or explanations.
