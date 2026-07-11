@@ -176,7 +176,12 @@ HIERARCHY RULES:
   and one qualifier at most — like a search tag, not a headline. Do NOT
   copy or paraphrase article titles; extract only the 2-3 most identifying
   keywords.
-- Bottom-level labels must NOT be generic category words standing alone.
+- If many sections share one subject, make that subject its own hierarchy
+  level rather than repeating it inside every bottom-level label.
+  A bottom-level label must not restate its parent;
+  it only needs to distinguish the section from its siblings under that parent.
+- Bottom-level labels must NOT be generic category words that say nothing
+  beyond the parent path.
 - Different articles, stories, or reviews MUST each get their own separate
   topic line with a unique descriptive label — even if they share a broad
   domain. Never merge distinct stories under one generic label.
@@ -200,8 +205,10 @@ def _build_topic_ranges_prompt(tagged_text: str) -> str:
 
 OUTPUT FORMAT:
 - One topic path per line, sorted by first marker ID ascending.
-- Format: Category>Subcategory>SpecificTopic: MarkerRanges
-- Use 2-4 levels separated by ">".
+- Format: Broad Category>Subcategory>Specific Topic: marker ranges
+- Example line: Technology>AI Safety>Chain of Thought Monitoring: 12-18, 24
+- Use 2-4 levels separated by ">" (up to 5 when a document-wide subject
+  needs its own level).
 - The topic path and the marker ranges are ALWAYS separated by ":". Use ":"
   only once per line, and never any other separator (no "|", "-", or dashes).
 - MarkerRanges are plain digits, "-" for spans and "," between them,
