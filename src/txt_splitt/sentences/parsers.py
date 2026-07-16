@@ -1,5 +1,6 @@
 """Response parser implementations."""
 
+import html
 import re
 from collections.abc import Iterable
 
@@ -118,13 +119,15 @@ def _normalize_label_key(label: tuple[str, ...]) -> tuple[str, ...]:
 def _normalize_label_parts(parts: Iterable[str]) -> tuple[str, ...]:
     """Normalize label parts to always use ">" as the hierarchy separator.
 
+    HTML entities echoed by the model are decoded, and runs of Unicode
+    whitespace (including non-breaking spaces) are collapsed before storage.
     Any ':' characters inside label segments are treated as sub-level separators.
     This keeps parsing tolerant of model outputs like "Apple: Mac Mini production"
     while canonicalizing final labels to ("Apple", "Mac Mini production").
     """
     normalized: list[str] = []
     for raw_part in parts:
-        part = raw_part.strip()
+        part = _normalize_label_segment(raw_part)
         if not part:
             continue
         for sub_part in part.split(":"):
@@ -132,6 +135,11 @@ def _normalize_label_parts(parts: Iterable[str]) -> tuple[str, ...]:
             if sub:
                 normalized.append(sub)
     return tuple(normalized)
+
+
+def _normalize_label_segment(raw: str) -> str:
+    """Decode entities and collapse Unicode whitespace in one label segment."""
+    return re.sub(r"\s+", " ", html.unescape(raw)).strip()
 
 
 def _parse_range_string(ranges_str: str) -> list[tuple[int, int]]:

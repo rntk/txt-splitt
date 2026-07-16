@@ -102,6 +102,34 @@ class TestTopicRangeParser:
         result = self.parser.parse(response, sentence_count=10)
         assert result[0].label == ("Technology", "AI", "GPT-4")
 
+    def test_label_entities_and_repeated_whitespace_are_canonicalized(self) -> None:
+        response = (
+            "Tech>Claude&nbsp;Tag>Intro: 0-1\n"
+            "Tech>Claude&nbsp;&nbsp;Tag>Features: 2-3\n"
+            "Tech>Claude   Tag>Demo: 4-5"
+        )
+        result = self.parser.parse(response, sentence_count=6)
+        assert [group.label for group in result] == [
+            ("Tech", "Claude Tag", "Intro"),
+            ("Tech", "Claude Tag", "Features"),
+            ("Tech", "Claude Tag", "Demo"),
+        ]
+
+    def test_entity_and_whitespace_variants_of_topic_are_merged(self) -> None:
+        response = "Tech>Claude&nbsp;Tag: 0-1\nTech>Claude  Tag: 3-4"
+        result = self.parser.parse(response, sentence_count=5)
+        assert len(result) == 1
+        assert result[0].label == ("Tech", "Claude Tag")
+        assert result[0].ranges == (
+            SentenceRange(start=0, end=1),
+            SentenceRange(start=3, end=4),
+        )
+
+    def test_non_breaking_spaces_in_label_are_collapsed(self) -> None:
+        response = "Tech>Claude\N{NO-BREAK SPACE}\N{NO-BREAK SPACE}Tag: 0-2"
+        result = self.parser.parse(response, sentence_count=3)
+        assert result[0].label == ("Tech", "Claude Tag")
+
     def test_inverted_range_swapped(self) -> None:
         response = "Technology>AI: 5-0"
         result = self.parser.parse(response, sentence_count=10)
