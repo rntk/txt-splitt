@@ -115,6 +115,36 @@ def test_create_pipeline_uses_topic_range_llm(tmp_path: Path) -> None:
     assert isinstance(pipeline._llm, TopicRangeLLM)
 
 
+def test_html_audio_payload_is_bounded_in_planned_requests() -> None:
+    args = _make_args(short_sentence_min_length=0, boundary_max_shift=0)
+    pipeline = create_pipeline(args, Path("audio.txt.html"))
+    payload = "UklGRtTgBQBXQVZF" * 32_000
+    text = (
+        "<p>Send the audio to the realtime API.</p>"
+        "<pre>{ &quot;type&quot;: &quot;input_audio_buffer.append&quot;, "
+        f"&quot;audio&quot;: &quot;{payload}&quot; }}</pre>"
+        "<p>Read the response from the server.</p>"
+    )
+
+    session = pipeline.start(text)
+    requests = session.pending_requests()
+
+    assert len(requests) > 1
+    contents = [
+        request.prompt.split("<content>\n", 1)[1].rsplit("\n</content>", 1)[0]
+        for request in requests
+    ]
+    assert all(len(content) <= args.max_chunk_chars for content in contents)
+    assert all(len(request.prompt) < 100_096 for request in requests)
+    # The huge payload retains its original sentence ID in every fragment.
+    audio_lines = [
+        line for content in contents for line in content.split("\n") if "UklGR" in line
+    ]
+    markers = {line.split(" ", 1)[0] for line in audio_lines}
+    assert len(audio_lines) > 1
+    assert len(markers) == 1
+
+
 def test_namespace_for_request_returns_explicit_namespace() -> None:
     request = LLMRequest(
         prompt="prompt",

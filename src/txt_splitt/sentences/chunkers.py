@@ -8,6 +8,7 @@ from txt_splitt.sentences.types import MarkedText
 _DEFAULT_MAX_CHARS = 12_000
 _DEFAULT_OVERLAP_CHARS = 500
 _MARKER_LINE_RE = re.compile(r"^\{\d+\}(?:\s|$)")
+_MARKER_PREFIX_RE = re.compile(r"^(\{\d+\}(?:\s|$))")
 
 
 # ------------------------------------------------------------------
@@ -27,13 +28,38 @@ def _is_marker_line(line: str) -> bool:
     return _MARKER_LINE_RE.match(line) is not None
 
 
-def _select_overlap(
-    new_lines: list[str], overlap_chars: int
-) -> list[str]:
+def _split_oversized_lines(lines: list[str], max_chars: int) -> list[str]:
+    """Bound long lines, repeating their marker on each payload fragment.
+
+    Continuation lines inherit the most recent marker when fragmented.
+    Payload characters are preserved, including unbroken encoded data.
+    """
+    bounded: list[str] = []
+    prefix = ""
+    for line in lines:
+        match = _MARKER_PREFIX_RE.match(line)
+        if match is not None:
+            prefix = match.group(1)
+        if len(line) <= max_chars:
+            bounded.append(line)
+            continue
+        payload = line[len(prefix) :] if match is not None else line
+        payload_budget = max_chars - len(prefix)
+        if payload_budget <= 0:
+            raise ValueError("max_chars must leave room for a sentence marker and text")
+        bounded.extend(
+            prefix + payload[start : start + payload_budget]
+            for start in range(0, len(payload), payload_budget)
+        )
+    return bounded
+
+
+def _select_overlap(new_lines: list[str], overlap_chars: int) -> list[str]:
     """Pick trailing lines from *new_lines* totalling >= *overlap_chars*.
 
     If the overlap would start on a non-marker continuation line,
-    extend it backwards to include the corresponding marker line.
+    extend it backwards to include the corresponding marker line when
+    that marker is present in *new_lines*.
     """
     if overlap_chars == 0:
         return []
@@ -59,7 +85,8 @@ class OverlapChunker:
     """Split MarkedText into balanced chunks with overlapping context.
 
     Each chunk's ``tagged_text`` will not exceed *max_chars* and splits
-    happen on line boundaries only.  The chunker estimates the optimal
+    happen on line boundaries where possible. Oversized lines are split
+    into fragments with the same sentence marker. The chunker estimates the optimal
     number of chunks up-front and distributes lines so that all chunks
     are approximately the same size.
 
@@ -67,6 +94,12 @@ class OverlapChunker:
     from the *end* of the previous chunk.  The amount of overlap is
     controlled by *overlap_chars*.  The overlap text counts toward the
     *max_chars* budget of the receiving chunk.
+    Overlap is reduced or omitted when necessary to fit new content.
+
+    Chunk boundaries can fall on continuation lines, so chunks are not
+    guaranteed to start with a sentence marker. Marker repetition applies
+    to oversized-line fragments; overlap selection includes the preceding
+    marker only when it is available in the previous chunk's new content.
     """
 
     def __init__(
@@ -90,7 +123,7 @@ class OverlapChunker:
         if len(tagged_text) <= self._max_chars:
             return [marked_text]
 
-        lines = tagged_text.split("\n")
+        lines = _split_oversized_lines(tagged_text.split("\n"), self._max_chars)
         total_len = _text_len(lines)
 
         # Budget available for *new* content per chunk (overlap eats into
@@ -103,16 +136,12 @@ class OverlapChunker:
 
         # Minimum chunks a greedy packing would produce. We already
         # returned above when the whole text fits in one chunk.
-        num_chunks = 1 + math.ceil(
-            (total_len - self._max_chars) / content_budget
-        )
+        num_chunks = 1 + math.ceil((total_len - self._max_chars) / content_budget)
 
         # Balance by equal tagged_text size across chunks. Summed over N
         # chunks, tagged_text totals total_len + (N-1)*overlap_chars
         # (overlap is counted once per chunk after the first).
-        target_size = (
-            total_len + (num_chunks - 1) * self._overlap_chars
-        ) / num_chunks
+        target_size = (total_len + (num_chunks - 1) * self._overlap_chars) / num_chunks
 
         chunks: list[MarkedText] = []
         overlap_lines: list[str] = []
@@ -120,6 +149,23 @@ class OverlapChunker:
         chunks_remaining = num_chunks
 
         while i < len(lines):
+            # Whole-line overlap can exceed the requested overlap budget.
+            # Drop leading sentences until the next new line fits. When
+            # trimming, skip continuation lines after each removed marker.
+            overlap_size = _text_len(overlap_lines)
+            overlap_start = 0
+            while (
+                overlap_start < len(overlap_lines)
+                and overlap_size + 1 + len(lines[i]) > self._max_chars
+            ):
+                overlap_size -= len(overlap_lines[overlap_start]) + 1
+                overlap_start += 1
+                while overlap_start < len(overlap_lines) and not _is_marker_line(
+                    overlap_lines[overlap_start]
+                ):
+                    overlap_size -= len(overlap_lines[overlap_start]) + 1
+                    overlap_start += 1
+            overlap_lines = overlap_lines[overlap_start:]
             current_lines = list(overlap_lines)
             current_chars = _text_len(current_lines)
             new_count = 0
@@ -146,12 +192,6 @@ class OverlapChunker:
                     and i < len(lines)
                 ):
                     break
-
-            # Guarantee progress.
-            if new_count == 0:
-                current_lines.append(lines[i])
-                i += 1
-                new_count = 1
 
             chunks.append(
                 MarkedText(
