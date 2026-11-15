@@ -45,7 +45,7 @@ def _extract_reasoning_and_content(response: dict[str, Any]) -> tuple[str, str]:
 class LLamaCPP:
     ALLOWED_MODELS = ["default"]
 
-    def __init__(self, host: str, model: str = "default"):
+    def __init__(self, host: str, model: str = "default") -> None:
         u = urlparse(host)
         self.__host = u.netloc
         self.__is_https = u.scheme.lower() == "https"
@@ -58,7 +58,7 @@ class LLamaCPP:
     ) -> str:
         conn = self.get_connection()
         payload = {
-            "model": "gpt-3.5-turbo",
+            "model": self.__model,
             "messages": [{"role": "user", "content": user_msgs[0]}],
             "temperature": temperature,
             "cache_prompt": True,
@@ -76,7 +76,7 @@ class LLamaCPP:
             # Raise exception for 400 status (request too large)
             if res.status == 400:
                 raise ValueError(f"Request too large (400): {err_msg}")
-            return err_msg
+            raise RuntimeError(f"LLM request failed: {err_msg}")
         resp = json.loads(resp_body)
 
         reasoning, content = _extract_reasoning_and_content(resp)
@@ -96,7 +96,7 @@ class AsyncLLamaCPP:
 
     ALLOWED_MODELS = ["default"]
 
-    def __init__(self, host: str, model: str = "default"):
+    def __init__(self, host: str, model: str = "default") -> None:
         u = urlparse(host)
         self.__host = u.netloc
         self.__is_https = u.scheme.lower() == "https"
@@ -112,7 +112,7 @@ class AsyncLLamaCPP:
     def _sync_call(self, user_msgs: List[str], temperature: float) -> str:
         conn = self._get_connection()
         payload = {
-            "model": "gpt-3.5-turbo",
+            "model": self.__model,
             "messages": [{"role": "user", "content": user_msgs[0]}],
             "temperature": temperature,
             "cache_prompt": True,
@@ -128,7 +128,7 @@ class AsyncLLamaCPP:
             logging.error(err_msg)
             if res.status == 400:
                 raise ValueError(f"Request too large (400): {err_msg}")
-            return err_msg
+            raise RuntimeError(f"LLM request failed: {err_msg}")
         resp = json.loads(resp_body)
 
         reasoning, content = _extract_reasoning_and_content(resp)
