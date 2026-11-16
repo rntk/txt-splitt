@@ -100,3 +100,78 @@ To enter the container environment:
 ```bash
 docker run --rm -it -v $(pwd):/app -e PYTHONPATH=src txt_splitt_dev bash
 ```
+
+## Benchmarking topic splitting
+
+`benchmark_text.py` reuses the pipeline in `split_text.py` and writes a JSON
+artifact plus a self-contained HTML report with charts. No reference topic
+boundaries or external chart services are required. Pass directories (searched
+recursively for `.txt`, `.md`, `.html`, and `.htm`) or a list of files:
+
+```bash
+./run_benchmark.sh files/ --host http://localhost:8080 \
+  --model model-a --label model-a --repeats 3 --warmup 1 \
+  --output-dir benchmark_results/model-a
+
+./run_benchmark.sh files/ \
+  --host http://localhost:8080 --model model-b --label model-b \
+  --repeats 3 --warmup 1 --output-dir benchmark_results/model-b \
+  --compare benchmark_results/model-a/benchmark_TIMESTAMP.json
+```
+
+You can also pass explicit paths, for example `files/article.txt files/page.html`,
+instead of a directory. Use the actual JSON filename printed by the first run. For a fair comparison,
+use the same input files, pipeline options, execution mode, hardware, and server
+settings for both models. The report flags differences in corpus or settings.
+`--model` sends the requested model identifier to the server; with a server that
+loads only one model, ensure that the intended model is actually loaded.
+
+The shell wrapper runs Python locally. To run inside the development image:
+
+```bash
+docker build -t txt_splitt_dev .
+docker run --rm -v "$(pwd):/app" txt_splitt_dev \
+  python benchmark_text.py files/ --host http://YOUR_SERVER:8080 \
+  --model model-a --label model-a --repeats 3
+```
+
+Rebuild or combine reports without calling an LLM (using `--compare` or `--report-only`):
+
+```bash
+python benchmark_text.py --compare \
+  benchmark_results/model-a/benchmark_TIMESTAMP.json \
+  benchmark_results/model-b/benchmark_TIMESTAMP.json \
+  --output-dir benchmark_results/comparison
+
+python benchmark_text.py --report-only \
+  benchmark_results/model-a/benchmark_TIMESTAMP.json \
+  benchmark_results/model-b/benchmark_TIMESTAMP.json \
+  --output-dir benchmark_results/comparison
+```
+
+Metrics include runtime and repeated-run variation, LLM call counts and durations,
+failure rates, throughput, topic and range counts, topic/range sizes in characters
+and sentences, immediate subtopics per hierarchy node, and distinct topics in ten
+equal sentence-position bins. Coverage, multiple assignment, invalid ranges, and
+single-sentence topics help identify structural problems. Raw per-run measurements
+and input hashes are retained in JSON for further analysis.
+
+A topic is a unique complete label path; hierarchy prefixes describe its parents.
+Topic sizes count each assigned sentence once per topic. Character counts use
+cleaned sentence text, excluding HTML markup and inter-sentence gaps. Sentence
+units come from the configured splitter and may be shorter than grammatical
+sentences. These are descriptive metrics: more topics, fewer topics, and deeper
+hierarchies do not automatically imply better semantic quality.
+
+Runs process documents sequentially; request concurrency follows the selected
+sync/async mode. Timing excludes file loading and report rendering. Warmup runs
+are excluded from measured results. Persistent client response caching is disabled;
+server-side prompt caching, load, and model warmup can still affect timing. Summed
+LLM durations can exceed wall time when requests run concurrently. Failed runs
+remain visible in the report and cause a nonzero process exit after artifacts are
+written. Run `python benchmark_text.py --help` for pipeline and execution options.
+
+For future quality comparisons, useful additions would be blind human ratings of
+label usefulness/coherence, repeated-run boundary stability, and server-reported
+token usage/cost. The current benchmark does not estimate semantic accuracy or
+infer token counts from character counts.
