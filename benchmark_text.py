@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Benchmark the standard text splitting pipeline and write portable reports."""
+"""Benchmark text splitting pipelines and write portable reports.
+
+``--splitter llm`` (default) runs the completion-only pipeline from
+``split_text.py``; ``--splitter decisions`` runs the decision-API pipeline from
+``split_text_decisions.py`` (decision model places boundaries, LLM names topics).
+"""
 
 import argparse
 import asyncio
@@ -18,16 +23,56 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 import split_text  # noqa: E402
+import split_text_decisions  # noqa: E402
 from txt_splitt.benchmark_metrics import measure_result  # noqa: E402
 from txt_splitt.benchmark_report import render_report  # noqa: E402
 from txt_splitt.llms.llamacpp import AsyncLLamaCPP, LLamaCPP  # noqa: E402
+from txt_splitt.llms.llamacpp_decisions import (  # noqa: E402
+    AsyncLLamaCPPDecisions,
+    LLamaCPPDecisions,
+)
 from txt_splitt.protocols import AsyncLLMCallable, LLMCallable  # noqa: E402
+from txt_splitt.sentences.decision_split import (  # noqa: E402
+    DECISION_BATCH_SIZE,
+    DECISION_CONTEXT_SENTENCES,
+    DECISION_NAMESPACE,
+    DECISION_SPLIT_THRESHOLD,
+    LABEL_NAMESPACE,
+)
 
 NAMESPACES = (
     "topic-range",
     "gap-repair",
     "short-sentence-enhancer",
     "boundary-evaluator",
+)
+SPLITTERS = ("llm", "decisions")
+# Settings shared by both splitters, then the ones only one of them uses. Only
+# the keys of the selected splitter go into the artifact config, so the report
+# flags a real configuration difference, not unused defaults.
+COMMON_CONFIG_KEYS = (
+    "splitter",
+    "temperature",
+    "anchor_words",
+    "long_sentence_threshold",
+    "min_sentence_words",
+    "max_chunk_chars",
+    "use_async",
+    "max_concurrent",
+    "repeats",
+    "warmup",
+)
+LLM_CONFIG_KEYS = (
+    "short_sentence_min_length",
+    "boundary_context_window",
+    "boundary_max_shift",
+)
+DECISION_CONFIG_KEYS = (
+    "threshold",
+    "decision_batch_size",
+    "decision_context_sentences",
+    "decision_context_window",
+    "decision_timeout",
 )
 EXTENSIONS = {".txt", ".md", ".html", ".htm"}
 
@@ -130,6 +175,46 @@ def parser_for_cli() -> argparse.ArgumentParser:
     parser.add_argument("--boundary-max-shift", type=int, default=0)
     parser.add_argument("--async", dest="use_async", action="store_true")
     parser.add_argument("--max-concurrent", type=int, default=10)
+    decisions = parser.add_argument_group(
+        "decision splitter", "Used only with --splitter decisions"
+    )
+    decisions.add_argument(
+        "--splitter",
+        choices=SPLITTERS,
+        default="llm",
+        help="llm: completion-only pipeline; decisions: decision API places "
+        "boundaries and the LLM names topics (default: llm)",
+    )
+    decisions.add_argument(
+        "--decision-host", help="Decision API server (default: same as --host)"
+    )
+    decisions.add_argument(
+        "--decision-model", help="Decision model name; omitted when not set"
+    )
+    decisions.add_argument(
+        "--decision-api-key-env",
+        default="DECISION_API_KEY",
+        help="Environment variable holding an optional bearer token",
+    )
+    decisions.add_argument("--decision-timeout", type=float, default=60.0)
+    decisions.add_argument(
+        "--threshold",
+        type=float,
+        default=DECISION_SPLIT_THRESHOLD,
+        help="Split when P(split) >= threshold",
+    )
+    decisions.add_argument(
+        "--decision-batch-size", type=int, default=DECISION_BATCH_SIZE
+    )
+    decisions.add_argument(
+        "--decision-context-sentences", type=int, default=DECISION_CONTEXT_SENTENCES
+    )
+    decisions.add_argument(
+        "--decision-context-window",
+        type=int,
+        default=0,
+        help="Decision model context window in tokens; 0 disables the check",
+    )
     return parser
 
 
@@ -165,6 +250,44 @@ def save_reports(
     write_atomic(html_path, render_report(payload, comparisons))
 
 
+def decision_client(args: argparse.Namespace) -> LLamaCPPDecisions:
+    return LLamaCPPDecisions(
+        args.decision_host or args.host,
+        model=args.decision_model,
+        api_key=os.environ.get(args.decision_api_key_env) or None,
+        timeout=args.decision_timeout,
+    )
+
+
+def sync_clients(args: argparse.Namespace, stats: CallStats) -> dict[str, LLMCallable]:
+    """Timed clients keyed by the namespaces the selected pipeline requests."""
+    llm = split_text.LLamaCPPAdapter(LLamaCPP(host=args.host, model=args.model))
+    if args.splitter == "decisions":
+        decider = split_text_decisions.DecisionAdapter(decision_client(args))
+        return {
+            DECISION_NAMESPACE: TimedSync(decider, DECISION_NAMESPACE, stats),
+            LABEL_NAMESPACE: TimedSync(llm, LABEL_NAMESPACE, stats),
+        }
+    return {n: TimedSync(llm, n, stats) for n in NAMESPACES}
+
+
+def async_clients(
+    args: argparse.Namespace, stats: CallStats
+) -> dict[str, AsyncLLMCallable]:
+    llm = split_text.AsyncLLamaCPPAdapter(
+        AsyncLLamaCPP(host=args.host, model=args.model)
+    )
+    if args.splitter == "decisions":
+        decider = split_text_decisions.AsyncDecisionAdapter(
+            AsyncLLamaCPPDecisions(decision_client(args))
+        )
+        return {
+            DECISION_NAMESPACE: TimedAsync(decider, DECISION_NAMESPACE, stats),
+            LABEL_NAMESPACE: TimedAsync(llm, LABEL_NAMESPACE, stats),
+        }
+    return {n: TimedAsync(llm, n, stats) for n in NAMESPACES}
+
+
 def execute_one(args: argparse.Namespace, path: Path, text: str) -> dict[str, Any]:
     stats = CallStats()
     start = perf_counter()
@@ -172,27 +295,23 @@ def execute_one(args: argparse.Namespace, path: Path, text: str) -> dict[str, An
     error = None
     elapsed = None
     try:
-        pipeline = split_text.create_pipeline(args, path)
+        if args.splitter == "decisions":
+            pipeline = split_text_decisions.create_pipeline(args, path)
+        else:
+            pipeline = split_text.create_pipeline(args, path)
         if args.use_async:
-            async_client = split_text.AsyncLLamaCPPAdapter(
-                AsyncLLamaCPP(host=args.host, model=args.model)
-            )
-            async_clients: dict[str, AsyncLLMCallable] = {
-                n: TimedAsync(async_client, n, stats) for n in NAMESPACES
-            }
             result = asyncio.run(
                 split_text.execute_session_async(
-                    pipeline, text, async_clients, max_concurrent=args.max_concurrent
+                    pipeline,
+                    text,
+                    async_clients(args, stats),
+                    max_concurrent=args.max_concurrent,
                 )
             )
         else:
-            client = split_text.LLamaCPPAdapter(
-                LLamaCPP(host=args.host, model=args.model)
+            result = split_text.execute_session_sync(
+                pipeline, text, sync_clients(args, stats)
             )
-            clients: dict[str, LLMCallable] = {
-                n: TimedSync(client, n, stats) for n in NAMESPACES
-            }
-            result = split_text.execute_session_sync(pipeline, text, clients)
         elapsed = perf_counter() - start
         metrics = measure_result(result)
     except Exception as exc:
@@ -228,6 +347,22 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("sentence, chunk and context sizes must be positive")
     if args.short_sentence_min_length < 0 or args.boundary_max_shift < 0:
         parser.error("enhancer settings must be nonnegative")
+    if args.splitter == "decisions":
+        if args.short_sentence_min_length or args.boundary_max_shift:
+            parser.error(
+                "--short-sentence-min-length and --boundary-max-shift are not "
+                "supported with --splitter decisions"
+            )
+        if not 0 <= args.threshold <= 1:
+            parser.error("threshold must be between 0 and 1")
+        if args.decision_batch_size < 1:
+            parser.error("decision-batch-size must be positive")
+        if args.decision_context_sentences < 0 or args.decision_context_window < 0:
+            parser.error("decision context settings must be nonnegative")
+        if not (math.isfinite(args.decision_timeout) and args.decision_timeout > 0):
+            parser.error("decision-timeout must be positive")
+        if args.max_chunk_chars < 16:
+            parser.error("max-chunk-chars must be at least 16 for label requests")
     standalone_compare = (
         not args.report_only
         and not args.inputs
@@ -260,19 +395,9 @@ def main(argv: list[str] | None = None) -> int:
             paths = discover(args.inputs)
             if not paths:
                 raise ValueError("No supported input files found")
-            config_keys = (
-                "temperature",
-                "anchor_words",
-                "long_sentence_threshold",
-                "min_sentence_words",
-                "max_chunk_chars",
-                "short_sentence_min_length",
-                "boundary_context_window",
-                "boundary_max_shift",
-                "use_async",
-                "max_concurrent",
-                "repeats",
-                "warmup",
+            decisions = args.splitter == "decisions"
+            config_keys = COMMON_CONFIG_KEYS + (
+                DECISION_CONFIG_KEYS if decisions else LLM_CONFIG_KEYS
             )
             config = {key: getattr(args, key) for key in config_keys}
             config["cache_enabled"] = False
@@ -282,6 +407,11 @@ def main(argv: list[str] | None = None) -> int:
                 "label": args.label,
                 "model": args.model,
                 "host": args.host,
+                "splitter": args.splitter,
+                "decision_host": (args.decision_host or args.host)
+                if decisions
+                else None,
+                "decision_model": args.decision_model if decisions else None,
                 "config": config,
                 "complete": False,
                 "documents": [],

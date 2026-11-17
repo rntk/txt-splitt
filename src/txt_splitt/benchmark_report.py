@@ -82,9 +82,14 @@ def _latencies(runs: list[dict[str, Any]]) -> list[float]:
 
 
 def _identity(payload: dict[str, Any]) -> str:
-    return (
+    identity = (
         f"{payload.get('label', 'Benchmark')} · {payload.get('model', 'unknown model')}"
     )
+    # Artifacts without a splitter predate the decision API and used the LLM.
+    if payload.get("splitter") == "decisions":
+        decision_model = payload.get("decision_model")
+        identity += " · decisions" + (f" ({decision_model})" if decision_model else "")
+    return identity
 
 
 def _warnings(payloads: list[dict[str, Any]]) -> str:
@@ -290,7 +295,13 @@ def render_report(payload: dict[str, Any], comparisons: list[dict[str, Any]]) ->
         sections.append(
             f"<section id='result-{index}'><h2>{_text(identity)}</h2>"
             f"<p>Created: {_text(result.get('created_at', 'unknown'))} · "
-            f"Host: {_text(result.get('host', 'unknown'))}</p>"
+            f"Host: {_text(result.get('host', 'unknown'))}"
+            + (
+                f" · Decision host: {_text(result['decision_host'])}"
+                if result.get("decision_host")
+                else ""
+            )
+            + "</p>"
             + _table(
                 [
                     "Document",

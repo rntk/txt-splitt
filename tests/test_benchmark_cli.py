@@ -1,6 +1,7 @@
 """Exercise benchmark orchestration without a running model server."""
 
 import json
+import re
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -253,3 +254,109 @@ def test_compare_single_file_without_inputs_errors(tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as exc_info:
         benchmark_text.main(["--compare", str(file1)])
     assert exc_info.value.code == 2
+
+
+def test_decision_splitter_records_its_config(tmp_path: Path, monkeypatch: Any) -> None:
+    source = tmp_path / "input.txt"
+    source.write_text("Hello.", encoding="utf-8")
+    out = tmp_path / "out"
+    monkeypatch.setattr(benchmark_text, "execute_one", lambda *args: _ok_run())
+    argv = [str(source), "--host", "http://x", "--repeats", "1"]
+    extra = ["--splitter", "decisions", "--threshold", "0.3", "--decision-model", "d"]
+    assert benchmark_text.main([*argv, *extra, "--output-dir", str(out)]) == 0
+    data = json.loads(next(out.glob("*.json")).read_text())
+    assert data["splitter"] == "decisions"
+    assert data["decision_host"] == "http://x"
+    assert data["decision_model"] == "d"
+    assert data["config"]["splitter"] == "decisions"
+    assert data["config"]["threshold"] == 0.3
+    assert "boundary_max_shift" not in data["config"]
+    assert "benchmark · default · decisions (d)" in next(out.glob("*.html")).read_text()
+
+
+def test_llm_splitter_config_has_no_decision_keys(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    source = tmp_path / "input.txt"
+    source.write_text("Hello.", encoding="utf-8")
+    out = tmp_path / "out"
+    monkeypatch.setattr(benchmark_text, "execute_one", lambda *args: _ok_run())
+    argv = [str(source), "--host", "http://x", "--repeats", "1"]
+    assert benchmark_text.main([*argv, "--output-dir", str(out)]) == 0
+    data = json.loads(next(out.glob("*.json")).read_text())
+    assert data["splitter"] == "llm"
+    assert data["config"]["splitter"] == "llm"
+    assert "threshold" not in data["config"]
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        ["--boundary-max-shift", "2"],
+        ["--threshold", "1.5"],
+        ["--decision-batch-size", "0"],
+        ["--decision-timeout", "0"],
+    ],
+)
+def test_decision_splitter_rejects_invalid_options(extra: list[str]) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        benchmark_text.main(
+            ["in.txt", "--host", "http://x", "--splitter", "decisions", *extra]
+        )
+    assert exc_info.value.code == 2
+
+
+class _FakeDecisions:
+    """Split before every even sentence id."""
+
+    def decide(self, state: Any, questions: dict[str, Any]) -> dict[str, Any]:
+        answers = {}
+        for key in questions:
+            split = int(key[1:]) % 2 == 1
+            answers[key] = {
+                "choice": "split" if split else "continue",
+                "probabilities": {
+                    "split": 0.9 if split else 0.1,
+                    "continue": 0.1 if split else 0.9,
+                },
+            }
+        return {"answers": answers}
+
+
+def _labels_for(prompt: str) -> str:
+    content = prompt.split("<content>", 1)[1]
+    sections = re.findall(r"^\[(\d+)\]$", content, flags=re.MULTILINE)
+    return "\n".join(f"{s}: Topic>Part {s}" for s in sections)
+
+
+class _FakeLLamaCPP:
+    def __init__(self, host: str, model: str) -> None:
+        pass
+
+    def call(self, prompts: list[str], temperature: float) -> str:
+        return _labels_for(prompts[0])
+
+
+class _FakeAsyncLLamaCPP(_FakeLLamaCPP):
+    async def call(  # type: ignore[override]
+        self, prompts: list[str], temperature: float
+    ) -> str:
+        return _labels_for(prompts[0])
+
+
+@pytest.mark.parametrize("use_async", [False, True])
+def test_decision_splitter_runs_end_to_end(monkeypatch: Any, use_async: bool) -> None:
+    monkeypatch.setattr(benchmark_text, "decision_client", lambda a: _FakeDecisions())
+    monkeypatch.setattr(benchmark_text, "LLamaCPP", _FakeLLamaCPP)
+    monkeypatch.setattr(benchmark_text, "AsyncLLamaCPP", _FakeAsyncLLamaCPP)
+    argv = ["x.txt", "--host", "http://x", "--splitter", "decisions"]
+    args = benchmark_text.parser_for_cli().parse_args(
+        argv + (["--async"] if use_async else [])
+    )
+    text = "First topic sentence here. Second one follows now. Third is last here."
+    run = benchmark_text.execute_one(args, Path("x.txt"), text)
+    assert run["status"] == "ok", run["error"]
+    namespaces = run["llm"]["namespaces"]
+    assert set(namespaces) == {"topic-boundaries", "topic-labels"}
+    assert run["llm"]["failures"] == 0
+    assert run["metrics"] is not None

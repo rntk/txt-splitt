@@ -119,6 +119,25 @@ recursively for `.txt`, `.md`, `.html`, and `.htm`) or a list of files:
   --compare benchmark_results/model-a/benchmark_TIMESTAMP.json
 ```
 
+To benchmark the decision-API splitter (`split_text_decisions.py`) instead,
+add `--splitter decisions`. The decision model places boundaries and the
+`--host`/`--model` LLM names the topics. Compare it against an LLM run as above:
+
+```bash
+./run_benchmark.sh files/ --splitter decisions \
+  --host http://localhost:8080 --model model-a \
+  --decision-host http://localhost:8081 --threshold 0.5 \
+  --label decisions --repeats 3 --warmup 1 \
+  --output-dir benchmark_results/decisions \
+  --compare benchmark_results/model-a/benchmark_TIMESTAMP.json
+```
+
+Decision options: `--decision-host` (default: `--host`), `--decision-model`,
+`--decision-api-key-env`, `--decision-timeout`, `--threshold`,
+`--decision-batch-size`, `--decision-context-sentences`, and
+`--decision-context-window`. LLM timings are reported per namespace
+(`topic-boundaries` for decisions, `topic-labels` for labels).
+
 You can also pass explicit paths, for example `files/article.txt files/page.html`,
 instead of a directory. Use the actual JSON filename printed by the first run. For a fair comparison,
 use the same input files, pipeline options, execution mode, hardware, and server
